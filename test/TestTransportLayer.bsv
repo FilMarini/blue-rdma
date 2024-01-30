@@ -31,8 +31,10 @@ endmodule
 
 module mkTestTransportLayerNormalOrErrCase#(Bool normalOrErrCase)(Empty);
     let minDmaLength = normalOrErrCase ? 1    : 536870912;  // 512MB // 65536;  //
-    let maxDmaLength = normalOrErrCase ? 8192 : 1073741824; // 1GB   // 131072; //
-    let qpType = IBV_QPT_XRC_SEND; // IBV_QPT_RC; //
+   //let maxDmaLength = normalOrErrCase ? 8192 : 1073741824; // 1GB   // 131072; //
+    let maxDmaLength = normalOrErrCase ? 200 : 1073741824; // 1GB   // 131072; //
+    let qpType = IBV_QPT_XRC_SEND;
+    // let qpType = IBV_QPT_RC;
     let pmtu = normalOrErrCase ? IBV_MTU_256 : IBV_MTU_4096;
     let isSendSideQ = True;
 
@@ -183,7 +185,8 @@ module mkInitMetaDataAndConnectQP#(
     );
 
     let pdNum = valueOf(MAX_PD);
-    let qpNum = valueOf(MAX_QP);
+    //let qpNum = valueOf(MAX_QP);
+    let qpNum = valueOf(1);
     let mrNum = valueOf(MAX_MR);
     let mrPerPD = valueOf(MAX_MR_PER_PD);
     let qpPerPD = valueOf(avgQpPerPD);
@@ -274,7 +277,8 @@ module mkInitMetaDataAndConnectQP#(
     PipeOut#(RKEY) rkey2InvPipeOut <- mkGenericRandomPipeOut;
     let payloadLenPipeOut <- mkRandomLenPipeOut(minDmaLength, maxDmaLength);
 
-    let countDown <- mkCountDown(valueOf(TDiv#(MAX_CMP_CNT, 10)));
+   //let countDown <- mkCountDown(valueOf(TDiv#(MAX_CMP_CNT, 10)));
+   let countDown <- mkCountDown(0);
 
     function ActionValue#(WorkReq) genWorkReq(
         WorkReqOpCode wrOpCode,
@@ -945,7 +949,8 @@ module mkInitMetaDataAndConnectQP#(
         if (isZero(qpRespCnt)) begin
             qpReqCnt  <= fromInteger(qpNum);
             qpRespCnt <= fromInteger(qpNum - 1);
-            initMetaDataStateReg <= normalOrErrCase ? META_DATA_ATOMIC_WR : META_DATA_SEND_WR;
+            // initMetaDataStateReg <= normalOrErrCase ? META_DATA_ATOMIC_WR : META_DATA_SEND_WR; // First operation defined here
+            initMetaDataStateReg <= normalOrErrCase ? META_DATA_WRITE_WR : META_DATA_SEND_WR; // First operation defined here
         end
         else begin
             qpRespCnt.decr(1);
@@ -984,6 +989,7 @@ module mkInitMetaDataAndConnectQP#(
     endrule
 
     if (isSendSideQ) begin
+       /*
         let needAtomicResp = True;
         addRules(
             issueWorkReqAndCheckWorkComp(
@@ -1011,7 +1017,7 @@ module mkInitMetaDataAndConnectQP#(
                 META_DATA_WRITE_WR
             )
         );
-
+        */
         let needWriteResp = False;
         addRules(
             issueWorkReqAndCheckWorkComp(
@@ -1023,9 +1029,9 @@ module mkInitMetaDataAndConnectQP#(
                 META_DATA_WRITE_WR,
                 META_DATA_CHECK_WRITE_WC,
                 META_DATA_SEND_WR
+                // normalOrErrCase ? META_DATA_SET_QP_ERR : META_DATA_DESTROY_QP
             )
         );
-
         PipeOut#(RKEY) rkeyPipeIn4Send <- mkConstantPipeOut(dontCareValue);
         let needSendResp = True;
         addRules(
@@ -1273,6 +1279,8 @@ module mkInitMetaDataAndConnectQP#(
     rule loop if (initMetaDataStateReg == META_DATA_NO_OP);
         initMetaDataStateReg <= META_DATA_CREATE_QP;
         countDown.decr;
+       
+       let countdown_value = countDown._read;
 
         // Clear all QP related queues
         qpnQ4Out.clear;
@@ -1287,7 +1295,8 @@ module mkInitMetaDataAndConnectQP#(
         sqpnQ4Read.clear;
         sqpnQ4Atomic.clear;
 
-        // $display("time=%0t: loop, isSendSideQ=", $time, fshow(isSendSideQ));
+       //$display("time=%0t: loop %0d, isSendSideQ=", $time, countdown._read, fshow(isSendSideQ));
+       $display("time=%0t: loop %0d, isSendSideQ=", $time, countdown_value, fshow(isSendSideQ));
     endrule
 
     interface qpnPipeOut         = toPipeOut(qpnQ4Out);
