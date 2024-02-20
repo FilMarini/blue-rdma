@@ -6,7 +6,7 @@ set -o xtrace
 
 rm -rf bsc-*
 # wget https://github.com/B-Lang-org/bsc/releases/download/2022.01/bsc-2022.01-ubuntu-20.04.tar.gz
-wget https://github.com/B-Lang-org/bsc/releases/download/2023.01/bsc-2023.01-ubuntu-22.04.tar.gz
+wget https://github.com/B-Lang-org/bsc/releases/download/2023.01/bsc-2023.01-ubuntu-20.04.tar.gz
 tar zxf bsc-*
 
 BSC_FILE_NAME=`ls bsc-*.tar.gz`
