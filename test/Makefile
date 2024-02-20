@@ -1,7 +1,7 @@
 include ../Makefile.base
 
-TESTFILE ?= TestExtractAndPrependPipeOut.bsv
-TOPMODULE ?= mkTestHeaderAndDataStreamConversion
+TESTFILE ?= TestTransportLayer.bsv
+TOPMODULE ?= mkTestTransportLayerNormalCase
 
 SIMSCRIPT = $(BUILDDIR)/$(TOPMODULE).sh
 
