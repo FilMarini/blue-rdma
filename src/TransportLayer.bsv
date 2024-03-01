@@ -15,6 +15,9 @@ import PrimUtils :: *;
 import QueuePair :: *;
 import Settings :: *;
 import Utils :: *;
+import PortConversion :: *;
+import ClientServer :: *;
+
 
 // TODO: check QP state when dispatching WR and RR,
 // and discard WR and RR when QP in abnormal state
@@ -71,6 +74,7 @@ interface TransportLayer;
     // interface Vector#(MAX_QP, rdmaReqRespPipeOut) rdmaReqRespPipeOut;
     // interface Vector#(MAX_QP, RdmaPktMetaDataAndPayloadPipeIn) respPktPipeInVec;
 endinterface
+
 
 (* synthesize *)
 module mkTransportLayer(TransportLayer) provisos(
@@ -182,4 +186,69 @@ module mkTransportLayer(TransportLayer) provisos(
 
     // method Maybe#(HandlerPD) getPD(QPN qpn) = qpMetaData.getPD(qpn);
     // method Maybe#(MetaDataMRs) getMRs4PD(HandlerPD pdHandler) = pdMetaData.getMRs4PD(pdHandler);
+endmodule
+
+
+interface AxiSTransportLayer;
+   // SQ
+   (* prefix = "s_recv_req" *)
+   interface RawRecvReqBusSlave rawRecvReqIn;
+   (* prefix = "s_work_req" *)
+   interface RawWorkReqBusSlave rawWorkReqIn;
+   // UDP IF
+   (* prefix = "s_data_stream" *)
+   interface RawDataStreamBusSlave rawRdmaDataStreamIn;
+   (* prefix = "m_data_stream" *)
+   interface RawDataStreamBusMaster rawRdmaDataStreamOut;
+   // CQ
+   (* prefix = "m_work_comp_rq" *)
+   interface RawWorkCompBusMaster rawWorkCompRQOut;
+   (* prefix = "m_work_comp_sq" *)
+   interface RawWorkCompBusMaster rawWorkCompSQOut;
+   // MetaData
+   (* prefix = "s_meta_data" *)
+   interface RawMetaDataBusSlave rawMetaDataStreamIn;
+   (* prefix = "m_meta_data" *)
+   interface RawMetaDataBusMaster rawMetaDataStreamOut;
+   // DMA Read
+   (* prefix = "m_dma_read" *)
+   interface RawDmaReadCltBusMaster rawDmaReadCltStreamOut;
+   (* prefix = "s_dma_read" *)
+   interface RawDmaReadCltBusSlave rawDmaReadCltStreamIn;
+   // DMA Write
+   (* prefix = "m_dma_write" *)
+   interface RawDmaWriteCltBusMaster rawDmaWriteCltStreamOut;
+   (* prefix = "s_dma_write" *)
+   interface RawDmaWriteCltBusSlave rawDmaWriteCltStreamIn;
+endinterface
+
+(* synthesize *)
+module mkAxiSTransportLayer(AxiSTransportLayer);
+   TransportLayer transportLayer <- mkTransportLayer;
+
+   let rawRecvReqSlv           <- mkRawRecvReqBusSlave(transportLayer.recvReqInput);
+   let rawWorkReqSlv           <- mkRawWorkReqBusSlave(transportLayer.workReqInput);
+   let rawRdmaDataStreamSlv    <- mkRawDataStreamBusSlave(transportLayer.rdmaDataStreamInput);
+   let rawRdmaDataStreamMst    <- mkRawDataStreamBusMaster(toGet(transportLayer.rdmaDataStreamPipeOut));
+   let rawWorkCompRQMst        <- mkRawWorkCompBusMaster(toGet(transportLayer.workCompPipeOutRQ));
+   let rawWorkCompSQMst        <- mkRawWorkCompBusMaster(toGet(transportLayer.workCompPipeOutSQ));
+   let rawMetaDataStreamMst    <- mkRawMetaDataBusMaster(transportLayer.srvPortMetaData.response);
+   let rawMetaDataStreamSlv    <- mkRawMetaDataBusSlave(transportLayer.srvPortMetaData.request);
+   let rawDmaReadCltStreamMst  <- mkRawDmaReadCltBusMaster(transportLayer.dmaReadClt.request);
+   let rawDmaReadCltStreamSlv  <- mkRawDmaReadCltBusSlave(transportLayer.dmaReadClt.response);
+   let rawDmaWriteCltStreamMst <- mkRawDmaWriteCltBusMaster(transportLayer.dmaWriteClt.request);
+   let rawDmaWriteCltStreamSlv <- mkRawDmaWriteCltBusSlave(transportLayer.dmaWriteClt.response);
+
+   interface rawRecvReqIn            = rawRecvReqSlv;
+   interface rawWorkReqIn            = rawWorkReqSlv;
+   interface rawRdmaDataStreamIn     = rawRdmaDataStreamSlv;
+   interface rawRdmaDataStreamOut    = rawRdmaDataStreamMst;
+   interface rawWorkCompRQOut        = rawWorkCompRQMst;
+   interface rawWorkCompSQOut        = rawWorkCompSQMst;
+   interface rawMetaDataStreamIn     = rawMetaDataStreamSlv;
+   interface rawMetaDataStreamOut    = rawMetaDataStreamMst;
+   interface rawDmaReadCltStreamOut  = rawDmaReadCltStreamMst;
+   interface rawDmaReadCltStreamIn   = rawDmaReadCltStreamSlv;
+   interface rawDmaWriteCltStreamOut = rawDmaWriteCltStreamMst;
+   interface rawDmaWriteCltStreamIn  = rawDmaWriteCltStreamSlv;
 endmodule
