@@ -194,9 +194,9 @@ class reqMr:
 # PD
 class respPd:
     def __init__(self, metaRespBus):
-        self.pdKey        = slice_vec(metaRespBus, 30, 0)
-        self.pdHandler    = slice_vec(metaRespBus, 62, 31)
-        self.successOrNot = get_bool(metaRespBus, 63)
+        self.pdKey        = slice_vec(metaRespBus, PD_KEY_B - 1, 0)
+        self.pdHandler    = slice_vec(metaRespBus, PD_KEY_B + PD_HANDLER_B - 1, PD_KEY_B)
+        self.successOrNot = get_bool(metaRespBus, PD_KEY_B + PD_HANDLER_B)
         self.busType      = slice_vec(metaRespBus, 275, 274)
 
 class reqPd:

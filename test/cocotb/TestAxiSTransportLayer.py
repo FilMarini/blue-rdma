@@ -18,8 +18,8 @@ from DmaPyServer import *
 # Number of tests
 CASES_NUM = 2
 # MetaData settings
-PD_NUM = 2
-QP_NUM = 4
+PD_NUM = 1
+QP_NUM = 1
 MR_NUM = 4
 
 class AxisTransportLayerTester:
