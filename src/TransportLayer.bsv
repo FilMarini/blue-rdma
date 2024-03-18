@@ -21,11 +21,16 @@ import ClientServer :: *;
 
 // TODO: check QP state when dispatching WR and RR,
 // and discard WR and RR when QP in abnormal state
+/*CR
 module mkWorkReqAndRecvReqDispatcher#(
     PipeOut#(WorkReq) workReqPipeIn, PipeOut#(RecvReq) recvReqPipeIn
 )(Tuple2#(Vector#(MAX_QP, PipeOut#(WorkReq)), Vector#(MAX_QP, PipeOut#(RecvReq))));
+*/
+module mkWorkReqAndRecvReqDispatcher#(
+    PipeOut#(WorkReq) workReqPipeIn
+)(Vector#(MAX_QP, PipeOut#(WorkReq)));
     Vector#(MAX_QP, FIFOF#(WorkReq)) workReqOutVec <- replicateM(mkFIFOF);
-    Vector#(MAX_QP, FIFOF#(RecvReq)) recvReqOutVec <- replicateM(mkFIFOF);
+    //CR Vector#(MAX_QP, FIFOF#(RecvReq)) recvReqOutVec <- replicateM(mkFIFOF);
 
     rule dispatchWorkReq;
         let wr = workReqPipeIn.first;
@@ -40,6 +45,7 @@ module mkWorkReqAndRecvReqDispatcher#(
         // );
     endrule
 
+   /*CR
     rule dispatchRecvReq;
         let rr = recvReqPipeIn.first;
         recvReqPipeIn.deq;
@@ -52,19 +58,24 @@ module mkWorkReqAndRecvReqDispatcher#(
         //     qpIndex, rr.sqpn, rr.id
         // );
     endrule
+   */
 
+   /*CR
     return tuple2(
         map(toPipeOut, workReqOutVec),
         map(toPipeOut, recvReqOutVec)
     );
+   */
+   return map(toPipeOut, workReqOutVec);
+
 endmodule
 
 interface TransportLayer;
-    interface Put#(RecvReq) recvReqInput;
+    //CR interface Put#(RecvReq) recvReqInput;
     interface Put#(WorkReq) workReqInput;
     interface Put#(DataStream) rdmaDataStreamInput;
     interface DataStreamPipeOut rdmaDataStreamPipeOut;
-    interface PipeOut#(WorkComp) workCompPipeOutRQ;
+    //CR interface PipeOut#(WorkComp) workCompPipeOutRQ;
     interface PipeOut#(WorkComp) workCompPipeOutSQ;
     interface MetaDataSrv srvPortMetaData;
     interface DmaReadClt  dmaReadClt;
@@ -87,15 +98,20 @@ module mkTransportLayer(TransportLayer) provisos(
     let rdmaReqRespPipeIn = toPipeOut(inputDataStreamQ);
 
     FIFOF#(WorkReq) inputWorkReqQ <- mkFIFOF;
-    FIFOF#(RecvReq) inputRecvReqQ <- mkFIFOF;
+    //CR FIFOF#(RecvReq) inputRecvReqQ <- mkFIFOF;
 
     let pdMetaData   <- mkMetaDataPDs;
     let permCheckSrv <- mkPermCheckSrv(pdMetaData);
     let qpMetaData   <- mkMetaDataQPs;
     let metaDataSrv  <- mkMetaDataSrv(pdMetaData, qpMetaData);
 
+   /*CR
     let { workReqPipeOutVec, recvReqPipeOutVec } <- mkWorkReqAndRecvReqDispatcher(
         toPipeOut(inputWorkReqQ), toPipeOut(inputRecvReqQ)
+   );
+   */
+   let workReqPipeOutVec <- mkWorkReqAndRecvReqDispatcher(
+        toPipeOut(inputWorkReqQ)
     );
 
     // let pktMetaDataAndPayloadPipeOutVec <- mkSimExtractNormalReqResp(
@@ -109,7 +125,7 @@ module mkTransportLayer(TransportLayer) provisos(
     );
 
     // Vector#(MAX_QP, DataStreamPipeOut)    qpDataStreamPipeOutVec = newVector;
-    Vector#(MAX_QP, PipeOut#(WorkComp)) qpRecvWorkCompPipeOutVec = newVector;
+    //CR Vector#(MAX_QP, PipeOut#(WorkComp)) qpRecvWorkCompPipeOutVec = newVector;
     Vector#(MAX_QP, PipeOut#(WorkComp)) qpSendWorkCompPipeOutVec = newVector;
 
     Vector#(TMul#(2, MAX_QP), DataStreamPipeOut) qpDataStreamPipeOutVec = newVector;
@@ -121,30 +137,32 @@ module mkTransportLayer(TransportLayer) provisos(
         IndexQP qpIndex = fromInteger(idx);
         let qp = qpMetaData.getQueuePairByIndexQP(qpIndex);
 
-        mkConnection(toGet(recvReqPipeOutVec[idx]), qp.recvReqIn);
+        //CR mkConnection(toGet(recvReqPipeOutVec[idx]), qp.recvReqIn);
         mkConnection(toGet(workReqPipeOutVec[idx]), qp.workReqIn);
+       /*CR
         mkConnection(
             pktMetaDataAndPayloadPipeOutVec[idx].reqPktPipeOut,
             qp.reqPktPipeIn
         );
+       */
         mkConnection(
             pktMetaDataAndPayloadPipeOutVec[idx].respPktPipeOut,
             qp.respPktPipeIn
         );
 
         // qpDataStreamPipeOutVec[idx]   = qp.rdmaReqRespPipeOut;
-        qpRecvWorkCompPipeOutVec[idx] = qp.workCompPipeOutRQ;
+        //CR qpRecvWorkCompPipeOutVec[idx] = qp.workCompPipeOutRQ;
         qpSendWorkCompPipeOutVec[idx] = qp.workCompPipeOutSQ;
 
         let leftIdx = 2 * idx;
         let rightIdx = 2 * idx + 1;
-        qpDataStreamPipeOutVec[leftIdx]  = qp.rdmaRespPipeOut;
+        //CR qpDataStreamPipeOutVec[leftIdx]  = qp.rdmaRespPipeOut;
         qpDataStreamPipeOutVec[rightIdx] = qp.rdmaReqPipeOut;
-        permCheckCltVec[leftIdx]         = qp.permCheckClt4RQ;
+        //CR permCheckCltVec[leftIdx]         = qp.permCheckClt4RQ;
         permCheckCltVec[rightIdx]        = qp.permCheckClt4SQ;
-        dmaReadCltVec[leftIdx]           = qp.dmaReadClt4RQ;
+        //CR dmaReadCltVec[leftIdx]           = qp.dmaReadClt4RQ;
         dmaReadCltVec[rightIdx]          = qp.dmaReadClt4SQ;
-        dmaWriteCltVec[leftIdx]          = qp.dmaWriteClt4RQ;
+        //CR dmaWriteCltVec[leftIdx]          = qp.dmaWriteClt4RQ;
         dmaWriteCltVec[rightIdx]         = qp.dmaWriteClt4SQ;
 
         // TODO: support CNP
@@ -166,7 +184,7 @@ module mkTransportLayer(TransportLayer) provisos(
     let dataStreamPipeOut <- mkPipeOutArbiter(qpDataStreamPipeOutVec, isDataStreamFinished);
 
     function Bool isWorkCompFinished(WorkComp wc) = True;
-    let recvWorkCompPipeOut <- mkPipeOutArbiter(qpRecvWorkCompPipeOutVec, isWorkCompFinished);
+    //CR let recvWorkCompPipeOut <- mkPipeOutArbiter(qpRecvWorkCompPipeOutVec, isWorkCompFinished);
     let sendWorkCompPipeOut <- mkPipeOutArbiter(qpSendWorkCompPipeOutVec, isWorkCompFinished);
     // let workCompPipeOut <- mkFixedBinaryPipeOutArbiter(
     //     recvWorkCompPipeOut, sendWorkCompPipeOut
@@ -174,10 +192,10 @@ module mkTransportLayer(TransportLayer) provisos(
 
     interface rdmaDataStreamInput = toPut(inputDataStreamQ);
     interface workReqInput        = toPut(inputWorkReqQ);
-    interface recvReqInput        = toPut(inputRecvReqQ);
+    //CR interface recvReqInput        = toPut(inputRecvReqQ);
     // interface srvWorkReqRecvReqWorkComp = toGPServer(inputWorkReqOrRecvReqQ, workCompPipeOut);
     interface rdmaDataStreamPipeOut = dataStreamPipeOut;
-    interface workCompPipeOutRQ = recvWorkCompPipeOut;
+    //CR interface workCompPipeOutRQ = recvWorkCompPipeOut;
     interface workCompPipeOutSQ = sendWorkCompPipeOut;
 
     interface srvPortMetaData = metaDataSrv;
@@ -191,8 +209,8 @@ endmodule
 
 interface AxiSTransportLayer;
    // SQ
-   (* prefix = "s_recv_req" *)
-   interface RawRecvReqBusSlave rawRecvReqIn;
+   //CR (* prefix = "s_recv_req" *)
+   //CR interface RawRecvReqBusSlave rawRecvReqIn;
    (* prefix = "s_work_req" *)
    interface RawWorkReqBusSlave rawWorkReqIn;
    // UDP IF
@@ -201,8 +219,8 @@ interface AxiSTransportLayer;
    (* prefix = "m_data_stream" *)
    interface RawDataStreamBusMaster rawRdmaDataStreamOut;
    // CQ
-   (* prefix = "m_work_comp_rq" *)
-   interface RawWorkCompBusMaster rawWorkCompRQOut;
+   //CR (* prefix = "m_work_comp_rq" *)
+   //CR interface RawWorkCompBusMaster rawWorkCompRQOut;
    (* prefix = "m_work_comp_sq" *)
    interface RawWorkCompBusMaster rawWorkCompSQOut;
    // MetaData
@@ -226,11 +244,11 @@ endinterface
 module mkAxiSTransportLayer(AxiSTransportLayer);
    TransportLayer transportLayer <- mkTransportLayer;
 
-   let rawRecvReqSlv           <- mkRawRecvReqBusSlave(transportLayer.recvReqInput);
+   //CR let rawRecvReqSlv           <- mkRawRecvReqBusSlave(transportLayer.recvReqInput);
    let rawWorkReqSlv           <- mkRawWorkReqBusSlave(transportLayer.workReqInput);
    let rawRdmaDataStreamSlv    <- mkRawDataStreamBusSlave(transportLayer.rdmaDataStreamInput);
    let rawRdmaDataStreamMst    <- mkRawDataStreamBusMaster(toGet(transportLayer.rdmaDataStreamPipeOut));
-   let rawWorkCompRQMst        <- mkRawWorkCompBusMaster(toGet(transportLayer.workCompPipeOutRQ));
+   //CR let rawWorkCompRQMst        <- mkRawWorkCompBusMaster(toGet(transportLayer.workCompPipeOutRQ));
    let rawWorkCompSQMst        <- mkRawWorkCompBusMaster(toGet(transportLayer.workCompPipeOutSQ));
    let rawMetaDataStreamMst    <- mkRawMetaDataBusMaster(transportLayer.srvPortMetaData.response);
    let rawMetaDataStreamSlv    <- mkRawMetaDataBusSlave(transportLayer.srvPortMetaData.request);
@@ -239,11 +257,11 @@ module mkAxiSTransportLayer(AxiSTransportLayer);
    let rawDmaWriteCltStreamMst <- mkRawDmaWriteCltBusMaster(transportLayer.dmaWriteClt.request);
    let rawDmaWriteCltStreamSlv <- mkRawDmaWriteCltBusSlave(transportLayer.dmaWriteClt.response);
 
-   interface rawRecvReqIn            = rawRecvReqSlv;
+   //CR interface rawRecvReqIn            = rawRecvReqSlv;
    interface rawWorkReqIn            = rawWorkReqSlv;
    interface rawRdmaDataStreamIn     = rawRdmaDataStreamSlv;
    interface rawRdmaDataStreamOut    = rawRdmaDataStreamMst;
-   interface rawWorkCompRQOut        = rawWorkCompRQMst;
+   //CR interface rawWorkCompRQOut        = rawWorkCompRQMst;
    interface rawWorkCompSQOut        = rawWorkCompSQMst;
    interface rawMetaDataStreamIn     = rawMetaDataStreamSlv;
    interface rawMetaDataStreamOut    = rawMetaDataStreamMst;

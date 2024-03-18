@@ -170,7 +170,7 @@ module mkExtractHeaderFromRdmaPktPipeOut#(
 endmodule
 
 interface InputRdmaPktBuf;
-    interface RdmaPktMetaDataAndPayloadPipeOut reqPktPipeOut;
+    //CR interface RdmaPktMetaDataAndPayloadPipeOut reqPktPipeOut;
     interface RdmaPktMetaDataAndPayloadPipeOut respPktPipeOut;
     interface PipeOut#(BTH) cnpPipeOut;
 endinterface
@@ -234,8 +234,8 @@ module mkInputRdmaPktBufAndHeaderValidation#(
 )(Vector#(MAX_QP, InputRdmaPktBuf));
     // Output FIFO for PipeOut
     Vector#(MAX_QP, FIFOF#(BTH))                         cnpOutVec <- replicateM(mkFIFOF);
-    Vector#(MAX_QP, FIFOF#(DataStream))           reqPayloadOutVec <- replicateM(mkFIFOF);
-    Vector#(MAX_QP, FIFOF#(RdmaPktMetaData))  reqPktMetaDataOutVec <- replicateM(mkFIFOF);
+    //CR Vector#(MAX_QP, FIFOF#(DataStream))           reqPayloadOutVec <- replicateM(mkFIFOF);
+    //CR Vector#(MAX_QP, FIFOF#(RdmaPktMetaData))  reqPktMetaDataOutVec <- replicateM(mkFIFOF);
     Vector#(MAX_QP, FIFOF#(DataStream))          respPayloadOutVec <- replicateM(mkFIFOF);
     Vector#(MAX_QP, FIFOF#(RdmaPktMetaData)) respPktMetaDataOutVec <- replicateM(mkFIFOF);
 
@@ -522,7 +522,8 @@ module mkInputRdmaPktBufAndHeaderValidation#(
 
             let qp = qpMetaData.getQueuePairByQPN(headerValidateInfo.dqpn);
             let isResp = isRespPkt || isCNP;
-            let cntrlStatus = isResp ? qp.statusSQ : qp.statusRQ;
+            //CR let cntrlStatus = isResp ? qp.statusSQ : qp.statusRQ;
+            let cntrlStatus = qp.statusSQ;
 
             let isValidHeader = False;
             let pdHandler = dontCareValue;
@@ -875,9 +876,11 @@ module mkInputRdmaPktBufAndHeaderValidation#(
         if (isRespPkt) begin
             respPayloadOutVec[qpIndex].enq(payloadFrag);
         end
+       /*CR
         else begin
             reqPayloadOutVec[qpIndex].enq(payloadFrag);
         end
+       */
         // $display(
         //     "time=%0t: 10th stage outputPayload", $time,
         //     ", qpIndex=%0d, isRespPkt=", qpIndex, fshow(isRespPkt)
@@ -891,18 +894,22 @@ module mkInputRdmaPktBufAndHeaderValidation#(
         if (isRespPkt) begin
             respPktMetaDataOutVec[qpIndex].enq(pktMetaData);
         end
+       /*CR
         else begin
             reqPktMetaDataOutVec[qpIndex].enq(pktMetaData);
         end
+       */
         // $display("time=%0t: final stage outputHeaderMetaData", $time);
     endrule
 
     function InputRdmaPktBuf genInputRdmaPktBuf(Integer idx);
         return interface InputRdmaPktBuf;
+   /*CR
             interface reqPktPipeOut = interface RdmaPktMetaDataAndPayloadPipeOut;
                 interface pktMetaData = toPipeOut(reqPktMetaDataOutVec[idx]);
                 interface payload     = toPipeOut(reqPayloadOutVec[idx]);
             endinterface;
+   */
 
             interface respPktPipeOut = interface RdmaPktMetaDataAndPayloadPipeOut;
                 interface pktMetaData = toPipeOut(respPktMetaDataOutVec[idx]);
