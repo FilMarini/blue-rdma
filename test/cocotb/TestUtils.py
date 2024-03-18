@@ -1,10 +1,8 @@
+from BSVSettings import *
 from cocotbext.axi.stream import define_stream
 import random
 from bitstring import Bits, BitArray, BitStream, pack
 import math
-
-# BSV Settins. These must match in the 'Settings.bsv' source file
-MAX_PD = 1
 
 # MetaData fields bits
 META_DATA_BITS = 303
@@ -19,16 +17,19 @@ PD_HANDLER_B = 32
 PD_KEY_B = PD_HANDLER_B - PD_INDEX_B
 
 # MR
+MAX_MR_PER_PD = int(MAX_MR / MAX_PD)
+MR_INDEX_B = int(math.log2(MAX_MR_PER_PD))
 MR_ALLOC_OR_NOT_B = 1
 MR_LADDR_B = 64
 MR_LEN_B = 32
 MR_ACCFLAGS_B = 8
 MR_PDHANDLER_B = 32
-MR_LKEYPART_B = 25
-MR_RKEYPART_B = 25
+MR_KEY_B = 32
+MR_LKEYPART_B = MR_KEY_B - MR_INDEX_B
+MR_RKEYPART_B = MR_KEY_B - MR_INDEX_B
 MR_LKEYORNOT_B = 1
-MR_RKEY_B = 32
-MR_LKEY_B = 32
+MR_RKEY_B = MR_KEY_B
+MR_LKEY_B = MR_KEY_B
 
 # QP InitAttr
 QPI_TYPE_B = 4

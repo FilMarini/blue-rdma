@@ -1,4 +1,5 @@
 from bitstring import BitStream as BS
+from BSVSettings import *
 from TestUtils import *
 
 # QP
@@ -144,15 +145,15 @@ class reqQp:
 # MR
 class respMr:
     def __init__(self, metaRespBus):
-        self.rKey         = slice_vec(metaRespBus, 31, 0)
-        self.lKey         = slice_vec(metaRespBus, 63, 32)
-        self.mrRKeyPart   = slice_vec(metaRespBus, 88, 64)
-        self.mrLKeyPart   = slice_vec(metaRespBus, 113, 89)
-        self.mrPdHandler  = slice_vec(metaRespBus, 145, 114)
-        self.mrAccFlags   = slice_vec(metaRespBus, 153, 146)
-        self.mrLen        = slice_vec(metaRespBus, 185, 154)
-        self.mrLAddr      = slice_vec(metaRespBus, 249, 186)
-        self.successOrNot = get_bool(metaRespBus, 250)
+        self.rKey         = slice_vec(metaRespBus, MR_RKEY_B - 1, 0)
+        self.lKey         = slice_vec(metaRespBus, MR_RKEY_B + MR_LKEY_B - 1, MR_RKEY_B)
+        self.mrRKeyPart   = slice_vec(metaRespBus, MR_RKEY_B + MR_LKEY_B + MR_RKEYPART_B - 1, MR_RKEY_B + MR_LKEY_B)
+        self.mrLKeyPart   = slice_vec(metaRespBus, MR_RKEY_B + MR_LKEY_B + MR_RKEYPART_B + MR_LKEYPART_B - 1, MR_RKEY_B + MR_LKEY_B + MR_RKEYPART_B)
+        self.mrPdHandler  = slice_vec(metaRespBus, MR_RKEY_B + MR_LKEY_B + MR_RKEYPART_B + MR_LKEYPART_B + MR_PDHANDLER_B - 1, MR_RKEY_B + MR_LKEY_B + MR_RKEYPART_B + MR_LKEYPART_B)
+        self.mrAccFlags   = slice_vec(metaRespBus, MR_RKEY_B + MR_LKEY_B + MR_RKEYPART_B + MR_LKEYPART_B + MR_PDHANDLER_B + MR_ACCFLAGS_B - 1, MR_RKEY_B + MR_LKEY_B + MR_RKEYPART_B + MR_LKEYPART_B + MR_PDHANDLER_B)
+        self.mrLen        = slice_vec(metaRespBus, MR_RKEY_B + MR_LKEY_B + MR_RKEYPART_B + MR_LKEYPART_B + MR_PDHANDLER_B + MR_ACCFLAGS_B + MR_LEN_B - 1, MR_RKEY_B + MR_LKEY_B + MR_RKEYPART_B + MR_LKEYPART_B + MR_PDHANDLER_B + MR_ACCFLAGS_B)
+        self.mrLAddr      = slice_vec(metaRespBus, MR_RKEY_B + MR_LKEY_B + MR_RKEYPART_B + MR_LKEYPART_B + MR_PDHANDLER_B + MR_ACCFLAGS_B + MR_LEN_B + MR_LADDR_B - 1, MR_RKEY_B + MR_LKEY_B + MR_RKEYPART_B + MR_LKEYPART_B + MR_PDHANDLER_B + MR_ACCFLAGS_B + MR_LEN_B)
+        self.successOrNot = get_bool(metaRespBus, MR_RKEY_B + MR_LKEY_B + MR_RKEYPART_B + MR_LKEYPART_B + MR_PDHANDLER_B + MR_ACCFLAGS_B + MR_LEN_B + MR_LADDR_B)
         self.busType      = slice_vec(metaRespBus, 275, 274)
 
 class reqMr:

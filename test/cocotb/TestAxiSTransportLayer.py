@@ -20,7 +20,7 @@ CASES_NUM = 2
 # MetaData settings
 PD_NUM = 1
 QP_NUM = 1
-MR_NUM = 4
+MR_NUM = 2
 
 class AxisTransportLayerTester:
     def __init__(
@@ -166,10 +166,8 @@ class AxisTransportLayerTester:
             dut_alloc_pd_resp = await self.meta_data_sink.recv()
             metaRespBus = BitStream(uint = dut_alloc_pd_resp.tdata.integer, length = META_DATA_BITS)
             pdResp = respPd(metaRespBus)
-            if not pdResp.successOrNot:
-                self.log.error("Creation of PD not successfull!")
-            if pdResp.busType.uint != METADATA_PD_T:
-                self.log.error(f'Bus type should be {METADATA_PD_T}, instead decoded {pdResp.busType.uint}')
+            assert pdResp.busType.uint == METADATA_PD_T, f'Bus type should be {METADATA_PD_T}, instead decoded {pdResp.busType.uint}'
+            assert pdResp.successOrNot, "Creation of PD not successfull!"
             self.log.info(f'pdHandler for PD {caseIdx}: {pdResp.pdHandler.hex}, {pdResp.pdHandler.bin}')
             self.log.debug(f'pdKey for PD {caseIdx}: {pdResp.pdKey.bin}')
             self.pdHandlerVec4Req.append(pdResp.pdHandler.uint)
@@ -198,10 +196,8 @@ class AxisTransportLayerTester:
             dut_alloc_mr_resp = await self.meta_data_sink.recv()
             metaRespBus = BitStream(uint = dut_alloc_mr_resp.tdata.integer, length = META_DATA_BITS)
             mrResp = respMr(metaRespBus)
-            if not mrResp.successOrNot:
-                self.log.error("Creation of MR not successfull!")
-            if mrResp.busType.uint != METADATA_MR_T:
-                self.log.error(f'Bus type should be {METADATA_MR_T}, instead decoded {mrResp.busType.uint}')
+            assert mrResp.busType.uint == METADATA_MR_T, f'Bus type should be {METADATA_MR_T}, instead decoded {mrResp.busType.uint}'
+            assert mrResp.successOrNot, "Creation of MR not successfull!"
             self.log.debug(f'lKey for write for MR {caseIdx}: {mrResp.lKey.hex}')
             self.lKeyVec4Write.append(mrResp.lKey.uint)
 
@@ -224,10 +220,8 @@ class AxisTransportLayerTester:
             dut_alloc_qp_resp = await self.meta_data_sink.recv()
             metaRespBus = BitStream(uint = dut_alloc_qp_resp.tdata.integer, length = META_DATA_BITS)
             qpResp = respQp(metaRespBus)
-            if not qpResp.successOrNot:
-                self.log.error("Creation of QP not successfull!")
-            if qpResp.busType.uint != METADATA_QP_T:
-                self.log.error(f'Bus type should be {METADATA_QP_T}, instead decoded {qpResp.busType.uint}')
+            assert qpResp.busType.uint == METADATA_QP_T, f'Bus type should be {METADATA_QP_T}, instead decoded {qpResp.busType.uint}'
+            assert qpResp.successOrNot, "Creation of QP not successfull!"
             self.log.debug(f'QPN for QP {caseIdx}: {qpResp.qpn.hex}')
             self.qpnVec.append(qpResp.qpn.uint)
             self.qpiTypeVec.append(qpResp.qpiType.uint)
@@ -250,14 +244,10 @@ class AxisTransportLayerTester:
             dut_alloc_qp_resp = await self.meta_data_sink.recv()
             metaRespBus = BitStream(uint = dut_alloc_qp_resp.tdata.integer, length = META_DATA_BITS)
             qpResp = respQp(metaRespBus)
-            if qpResp.busType.uint != METADATA_QP_T:
-                self.log.error(f'Bus type should be {METADATA_QP_T}, instead decoded {qpResp.busType.uint}')
-            if not qpResp.successOrNot:
-                self.log.error("QP to init state not successfull!")
-            if qpResp.qpaQpState.uint != IBV_QPS_INIT:
-                self.log.error(f'QP state not in init state, instead decoded {qpResp.qpaQpState.uint}')
-            else:
-                self.log.info(f'QP {caseIdx} state to Init')
+            assert qpResp.busType.uint == METADATA_QP_T, f'Bus type should be {METADATA_QP_T}, instead decoded {qpResp.busType.uint}'
+            assert qpResp.successOrNot, "QP to init state not successfull!"
+            assert qpResp.qpaQpState.uint == IBV_QPS_INIT, f'QP state not in init state, instead decoded {qpResp.qpaQpState.uint}'
+            self.log.info(f'QP {caseIdx} state to Init')
 
     async def req_rtr_qp(self):
         for caseIdx in range(self.qpNum):
@@ -279,14 +269,10 @@ class AxisTransportLayerTester:
             dut_alloc_qp_resp = await self.meta_data_sink.recv()
             metaRespBus = BitStream(uint = dut_alloc_qp_resp.tdata.integer, length = META_DATA_BITS)
             qpResp = respQp(metaRespBus)
-            if qpResp.busType.uint != METADATA_QP_T:
-                self.log.error(f'Bus type should be {METADATA_QP_T}, instead decoded {qpResp.busType.uint}')
-            if not qpResp.successOrNot:
-                self.log.error("QP to RTR state not successfull!")
-            if qpResp.qpaQpState.uint != IBV_QPS_RTR:
-                self.log.error(f'QP state not in rtr state, instead decoded {qpResp.qpaQpState.uint}')
-            else:
-                self.log.info(f'QP {caseIdx} state to RTR with qpn: {qpResp.qpn.hex} and dqpn: {qpResp.qpaDqpn.hex}')
+            assert qpResp.busType.uint == METADATA_QP_T, f'Bus type should be {METADATA_QP_T}, instead decoded {qpResp.busType.uint}'
+            assert qpResp.successOrNot, "QP to RTR state not successfull!"
+            assert qpResp.qpaQpState.uint == IBV_QPS_RTR, f'QP state not in RTR state, instead decoded {qpResp.qpaQpState.uint}'
+            self.log.info(f'QP {caseIdx} state to RTR with qpn: {qpResp.qpn.hex} and dqpn: {qpResp.qpaDqpn.hex}')
             self.qpnVec4RTS.append(qpResp.qpn.uint)
             self.sqpnVec4Write.append([qpResp.qpn.uint, qpResp.qpaDqpn.uint])
 
@@ -310,14 +296,10 @@ class AxisTransportLayerTester:
             dut_alloc_qp_resp = await self.meta_data_sink.recv()
             metaRespBus = BitStream(uint = dut_alloc_qp_resp.tdata.integer, length = META_DATA_BITS)
             qpResp = respQp(metaRespBus)
-            if qpResp.busType.uint != METADATA_QP_T:
-                self.log.error(f'Bus type should be {METADATA_QP_T}, instead decoded {qpResp.busType.uint}')
-            if not qpResp.successOrNot:
-                self.log.error("QP to RTS state not successfull!")
-            if qpResp.qpaQpState.uint != IBV_QPS_RTS:
-                self.log.error(f'QP state not in rts state, instead decoded {qpResp.qpaQpState.uint}')
-            else:
-                self.log.info(f'QP {caseIdx} state to RTS')
+            assert qpResp.busType.uint == METADATA_QP_T, f'Bus type should be {METADATA_QP_T}, instead decoded {qpResp.busType.uint}'
+            assert qpResp.successOrNot, "QP to RTS state not successfull!"
+            assert qpResp.qpaQpState.uint == IBV_QPS_RTS, f'QP state not in RTS state, instead decoded {qpResp.qpaQpState.uint}'
+            self.log.info(f'QP {caseIdx} state to RTS')
 
     async def issue_work_req(self):
         for caseIdx in range(self.qpNum):
