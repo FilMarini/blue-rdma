@@ -128,10 +128,16 @@ module mkTransportLayer(TransportLayer) provisos(
     //CR Vector#(MAX_QP, PipeOut#(WorkComp)) qpRecvWorkCompPipeOutVec = newVector;
     Vector#(MAX_QP, PipeOut#(WorkComp)) qpSendWorkCompPipeOutVec = newVector;
 
+   /*CR
     Vector#(TMul#(2, MAX_QP), DataStreamPipeOut) qpDataStreamPipeOutVec = newVector;
     Vector#(TMul#(2, MAX_QP), PermCheckClt) permCheckCltVec = newVector;
     Vector#(TMul#(2, MAX_QP), DmaReadClt)     dmaReadCltVec = newVector;
-    Vector#(TMul#(2, MAX_QP), DmaWriteClt)   dmaWriteCltVec = newVector;
+   Vector#(TMul#(2, MAX_QP), DmaWriteClt)   dmaWriteCltVec = newVector;
+   */
+    Vector#(TMul#(1, MAX_QP), DataStreamPipeOut) qpDataStreamPipeOutVec = newVector;
+    Vector#(TMul#(1, MAX_QP), PermCheckClt) permCheckCltVec = newVector;
+    Vector#(TMul#(1, MAX_QP), DmaReadClt)     dmaReadCltVec = newVector;
+    Vector#(TMul#(1, MAX_QP), DmaWriteClt)   dmaWriteCltVec = newVector;
 
     for (Integer idx = 0; idx < valueOf(MAX_QP); idx = idx + 1) begin
         IndexQP qpIndex = fromInteger(idx);
@@ -154,16 +160,20 @@ module mkTransportLayer(TransportLayer) provisos(
         //CR qpRecvWorkCompPipeOutVec[idx] = qp.workCompPipeOutRQ;
         qpSendWorkCompPipeOutVec[idx] = qp.workCompPipeOutSQ;
 
-        let leftIdx = 2 * idx;
-        let rightIdx = 2 * idx + 1;
+        //CR     let leftIdx = 2 * idx;
+        //CR     let rightIdx = 2 * idx + 1;
         //CR qpDataStreamPipeOutVec[leftIdx]  = qp.rdmaRespPipeOut;
-        qpDataStreamPipeOutVec[rightIdx] = qp.rdmaReqPipeOut;
+        //CR     qpDataStreamPipeOutVec[rightIdx] = qp.rdmaReqPipeOut;
+        qpDataStreamPipeOutVec[idx] = qp.rdmaReqPipeOut;
         //CR permCheckCltVec[leftIdx]         = qp.permCheckClt4RQ;
-        permCheckCltVec[rightIdx]        = qp.permCheckClt4SQ;
+        //CR     permCheckCltVec[rightIdx]        = qp.permCheckClt4SQ;
+        permCheckCltVec[idx]        = qp.permCheckClt4SQ;
         //CR dmaReadCltVec[leftIdx]           = qp.dmaReadClt4RQ;
-        dmaReadCltVec[rightIdx]          = qp.dmaReadClt4SQ;
+        //CR     dmaReadCltVec[rightIdx]          = qp.dmaReadClt4SQ;
+        dmaReadCltVec[idx]          = qp.dmaReadClt4SQ;
         //CR dmaWriteCltVec[leftIdx]          = qp.dmaWriteClt4RQ;
-        dmaWriteCltVec[rightIdx]         = qp.dmaWriteClt4SQ;
+        //CR     dmaWriteCltVec[rightIdx]         = qp.dmaWriteClt4SQ;
+        dmaWriteCltVec[idx]         = qp.dmaWriteClt4SQ;
 
         // TODO: support CNP
         let addNoErrWorkCompOutRule <- addRules(genEmptyPipeOutRule(

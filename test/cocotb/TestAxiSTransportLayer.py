@@ -67,12 +67,14 @@ class AxisTransportLayerTester:
             False
         )
         # RecvReqAxisSlave
+        """
         self.recv_req_src = RecvReqSource(
             RecvReqBus.from_prefix(dut, "s_recv_req"),
             self.clock,
             self.resetn,
             False,
         )
+        """
         # WorkReqAxisSlave
         self.work_req_src = WorkReqSource(
             WorkReqBus.from_prefix(dut, "s_work_req"),
@@ -81,12 +83,14 @@ class AxisTransportLayerTester:
             False,
         )
         # WorkCompRQAxisMaster
+        """
         self.work_comp_rq_sink = WorkCompSink(
             WorkCompBus.from_prefix(dut, "m_work_comp_rq"),
             self.clock,
             self.resetn,
             False,
         )
+        """
         # WorkCompSQAxisMaster
         self.work_comp_rq_sink = WorkCompSink(
             WorkCompBus.from_prefix(dut, "m_work_comp_sq"),
