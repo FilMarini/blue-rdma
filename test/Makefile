@@ -1,5 +1,8 @@
 include ../Makefile.base
 
+#TESTFILE ?= TestMetaData.bsv
+#TOPMODULE ?= mkTestMetaDataMRs
+
 TESTFILE ?= TestTransportLayer.bsv
 TOPMODULE ?= mkTestTransportLayerNormalCase
 
@@ -13,7 +16,7 @@ link: compile
 	bsc -sim $(BLUESIMFLAGS) $(DIRFLAGS) $(RECOMPILEFLAGS) $(SCHEDFLAGS) $(TRANSFLAGS) -e $(TOPMODULE) -o $(SIMSCRIPT)
 
 simulate: link
-	$(SIMSCRIPT)
+	$(SIMSCRIPT) -V
 
 clean:
 	rm -rf $(BUILDDIR)

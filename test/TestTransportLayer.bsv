@@ -950,7 +950,7 @@ module mkInitMetaDataAndConnectQP#(
             qpReqCnt  <= fromInteger(qpNum);
             qpRespCnt <= fromInteger(qpNum - 1);
             // initMetaDataStateReg <= normalOrErrCase ? META_DATA_ATOMIC_WR : META_DATA_SEND_WR; // First operation defined here
-            initMetaDataStateReg <= normalOrErrCase ? META_DATA_WRITE_WR : META_DATA_SEND_WR; // First operation defined here
+            initMetaDataStateReg <= normalOrErrCase ? META_DATA_READ_WR : META_DATA_SEND_WR; // First operation defined here
         end
         else begin
             qpRespCnt.decr(1);
@@ -1003,7 +1003,7 @@ module mkInitMetaDataAndConnectQP#(
                 META_DATA_READ_WR
             )
         );
-
+        */
         let needReadResp = True;
         addRules(
             issueWorkReqAndCheckWorkComp(
@@ -1017,8 +1017,8 @@ module mkInitMetaDataAndConnectQP#(
                 META_DATA_WRITE_WR
             )
         );
-        */
-        let needWriteResp = False;
+
+        let needWriteResp = True;
         addRules(
             issueWorkReqAndCheckWorkComp(
                 IBV_WR_RDMA_WRITE,
