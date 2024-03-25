@@ -79,7 +79,7 @@ interface TransportLayer;
     interface PipeOut#(WorkComp) workCompPipeOutSQ;
     interface MetaDataSrv srvPortMetaData;
     interface DmaReadClt  dmaReadClt;
-    interface DmaWriteClt dmaWriteClt;
+    //CR interface DmaWriteClt dmaWriteClt;
 
     // method Maybe#(HandlerPD) getPD(QPN qpn);
     // interface Vector#(MAX_QP, rdmaReqRespPipeOut) rdmaReqRespPipeOut;
@@ -101,7 +101,7 @@ module mkTransportLayer(TransportLayer) provisos(
     //CR FIFOF#(RecvReq) inputRecvReqQ <- mkFIFOF;
 
     let pdMetaData   <- mkMetaDataPDs;
-    let permCheckSrv <- mkPermCheckSrv(pdMetaData);
+    //CR let permCheckSrv <- mkPermCheckSrv(pdMetaData);
     let qpMetaData   <- mkMetaDataQPs;
     let metaDataSrv  <- mkMetaDataSrv(pdMetaData, qpMetaData);
 
@@ -135,9 +135,9 @@ module mkTransportLayer(TransportLayer) provisos(
    Vector#(TMul#(2, MAX_QP), DmaWriteClt)   dmaWriteCltVec = newVector;
    */
     Vector#(TMul#(1, MAX_QP), DataStreamPipeOut) qpDataStreamPipeOutVec = newVector;
-    Vector#(TMul#(1, MAX_QP), PermCheckClt) permCheckCltVec = newVector;
+    //CR Vector#(TMul#(1, MAX_QP), PermCheckClt) permCheckCltVec = newVector;
     Vector#(TMul#(1, MAX_QP), DmaReadClt)     dmaReadCltVec = newVector;
-    Vector#(TMul#(1, MAX_QP), DmaWriteClt)   dmaWriteCltVec = newVector;
+    //CR Vector#(TMul#(1, MAX_QP), DmaWriteClt)   dmaWriteCltVec = newVector;
 
     for (Integer idx = 0; idx < valueOf(MAX_QP); idx = idx + 1) begin
         IndexQP qpIndex = fromInteger(idx);
@@ -167,13 +167,13 @@ module mkTransportLayer(TransportLayer) provisos(
         qpDataStreamPipeOutVec[idx] = qp.rdmaReqPipeOut;
         //CR permCheckCltVec[leftIdx]         = qp.permCheckClt4RQ;
         //CR     permCheckCltVec[rightIdx]        = qp.permCheckClt4SQ;
-        permCheckCltVec[idx]        = qp.permCheckClt4SQ;
+        //CR permCheckCltVec[idx]        = qp.permCheckClt4SQ;
         //CR dmaReadCltVec[leftIdx]           = qp.dmaReadClt4RQ;
         //CR     dmaReadCltVec[rightIdx]          = qp.dmaReadClt4SQ;
         dmaReadCltVec[idx]          = qp.dmaReadClt4SQ;
         //CR dmaWriteCltVec[leftIdx]          = qp.dmaWriteClt4RQ;
         //CR     dmaWriteCltVec[rightIdx]         = qp.dmaWriteClt4SQ;
-        dmaWriteCltVec[idx]         = qp.dmaWriteClt4SQ;
+        //CR dmaWriteCltVec[idx]         = qp.dmaWriteClt4SQ;
 
         // TODO: support CNP
         let addNoErrWorkCompOutRule <- addRules(genEmptyPipeOutRule(
@@ -183,11 +183,11 @@ module mkTransportLayer(TransportLayer) provisos(
         ));
     end
 
-    let arbitratedPermCheckClt <- mkPermCheckCltArbiter(permCheckCltVec);
+    //CR let arbitratedPermCheckClt <- mkPermCheckCltArbiter(permCheckCltVec);
     let arbitratedDmaReadClt   <- mkDmaReadCltArbiter(dmaReadCltVec);
-    let arbitratedDmaWriteClt  <- mkDmaWriteCltArbiter(dmaWriteCltVec);
+    //CR let arbitratedDmaWriteClt  <- mkDmaWriteCltArbiter(dmaWriteCltVec);
 
-    mkConnection(arbitratedPermCheckClt, permCheckSrv);
+    //CR mkConnection(arbitratedPermCheckClt, permCheckSrv);
 
     function Bool isDataStreamFinished(DataStream ds) = ds.isLast;
     // TODO: connect to UDP
@@ -210,7 +210,7 @@ module mkTransportLayer(TransportLayer) provisos(
 
     interface srvPortMetaData = metaDataSrv;
     interface dmaReadClt  = arbitratedDmaReadClt;
-    interface dmaWriteClt = arbitratedDmaWriteClt;
+    //CR interface dmaWriteClt = arbitratedDmaWriteClt;
 
     // method Maybe#(HandlerPD) getPD(QPN qpn) = qpMetaData.getPD(qpn);
     // method Maybe#(MetaDataMRs) getMRs4PD(HandlerPD pdHandler) = pdMetaData.getMRs4PD(pdHandler);
@@ -244,10 +244,10 @@ interface AxiSTransportLayer;
    (* prefix = "s_dma_read" *)
    interface RawDmaReadCltBusSlave rawDmaReadCltStreamIn;
    // DMA Write
-   (* prefix = "m_dma_write" *)
-   interface RawDmaWriteCltBusMaster rawDmaWriteCltStreamOut;
-   (* prefix = "s_dma_write" *)
-   interface RawDmaWriteCltBusSlave rawDmaWriteCltStreamIn;
+   //CR (* prefix = "m_dma_write" *)
+   //CR interface RawDmaWriteCltBusMaster rawDmaWriteCltStreamOut;
+   //CR (* prefix = "s_dma_write" *)
+   //CR interface RawDmaWriteCltBusSlave rawDmaWriteCltStreamIn;
 endinterface
 
 (* synthesize *)
@@ -264,8 +264,8 @@ module mkAxiSTransportLayer(AxiSTransportLayer);
    let rawMetaDataStreamSlv    <- mkRawMetaDataBusSlave(transportLayer.srvPortMetaData.request);
    let rawDmaReadCltStreamMst  <- mkRawDmaReadCltBusMaster(transportLayer.dmaReadClt.request);
    let rawDmaReadCltStreamSlv  <- mkRawDmaReadCltBusSlave(transportLayer.dmaReadClt.response);
-   let rawDmaWriteCltStreamMst <- mkRawDmaWriteCltBusMaster(transportLayer.dmaWriteClt.request);
-   let rawDmaWriteCltStreamSlv <- mkRawDmaWriteCltBusSlave(transportLayer.dmaWriteClt.response);
+   //CR let rawDmaWriteCltStreamMst <- mkRawDmaWriteCltBusMaster(transportLayer.dmaWriteClt.request);
+   //CR let rawDmaWriteCltStreamSlv <- mkRawDmaWriteCltBusSlave(transportLayer.dmaWriteClt.response);
 
    //CR interface rawRecvReqIn            = rawRecvReqSlv;
    interface rawWorkReqIn            = rawWorkReqSlv;
@@ -277,6 +277,6 @@ module mkAxiSTransportLayer(AxiSTransportLayer);
    interface rawMetaDataStreamOut    = rawMetaDataStreamMst;
    interface rawDmaReadCltStreamOut  = rawDmaReadCltStreamMst;
    interface rawDmaReadCltStreamIn   = rawDmaReadCltStreamSlv;
-   interface rawDmaWriteCltStreamOut = rawDmaWriteCltStreamMst;
-   interface rawDmaWriteCltStreamIn  = rawDmaWriteCltStreamSlv;
+   //CR interface rawDmaWriteCltStreamOut = rawDmaWriteCltStreamMst;
+   //CR interface rawDmaWriteCltStreamIn  = rawDmaWriteCltStreamSlv;
 endmodule

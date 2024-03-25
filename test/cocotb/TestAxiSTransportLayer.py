@@ -127,19 +127,23 @@ class AxisTransportLayerTester:
             False,
         )
         # DmaWriteCltAxisMaster
+        """
         self.dma_write_clt_sink = DmaWriteCltReqSink(
             DmaWriteCltReqBus.from_prefix(dut, "m_dma_write"),
             self.clock,
             self.resetn,
             False,
         )
+        """
         # DmaReadCltAxisMaster
+        """
         self.dma_write_clt_src = DmaWriteCltRespSource(
             DmaWriteCltRespBus.from_prefix(dut, "s_dma_write"),
             self.clock,
             self.resetn,
             False,
         )
+        """
 
     async def gen_clock(self):
         await cocotb.start(Clock(self.clock, 10, "ns").start())
