@@ -144,6 +144,35 @@ interface RawDmaReadCltBusSlave;
 endinterface
 
 (* always_ready, always_enabled *)
+interface RawDmaReadSrvBusMaster;
+   (* result = "valid"       *) method Bool valid;
+   (* result = "initiator"   *) method DmaReqSrcType initiator;
+   (* result = "sqpn"        *) method QPN sqpn;
+   (* result = "wr_id"       *) method WorkReqID wrID;
+   (* result = "is_resp_err" *) method Bool isRespErr;
+   (* result = "data_stream" *) method DataStream dataStream;
+
+   (* prefix = "" *)
+   method Action ready((* port = "ready" *) Bool rdy);
+endinterface
+
+(* always_ready, always_enabled *)
+interface RawDmaReadSrvBusSlave;
+   (* prefix = "" *)
+      method Action validData(
+         (* port = "valid"       *) Bool valid,
+         (* port = "initiator"   *) DmaReqSrcType initiator,
+         (* port = "sqpn"        *) QPN sqpn,
+         (* port = "wr_id"       *) WorkReqID wrID,
+         (* port = "start_addr"  *) ADDR startAddr,
+         (* port = "len"         *) PktLen len,
+         (* port = "mr_idx"      *) IndexMR mrIdx
+         );
+
+   (* result = "ready" *) method Bool ready;
+endinterface
+
+(* always_ready, always_enabled *)
 interface RawDmaWriteCltBusMaster;
    (* result = "valid"       *) method Bool valid;
    (* result = "meta_data"   *) method DmaWriteMetaData metaData;
@@ -395,6 +424,69 @@ module mkRawDmaReadCltBusSlave#(Put#(DmaReadResp) putIn)(RawDmaReadCltBusSlave);
 
    method Bool ready = rawBus.ready;
 endmodule
+
+module mkRawDmaReadSrvBusMaster#(Get#(DmaReadResp) getOut)(RawDmaReadSrvBusMaster);
+   RawBusMaster#(DmaReadResp) rawBus <- mkGetToRawBusMaster(getOut, CF);
+
+   method Bool valid              = rawBus.valid;
+   method DmaReqSrcType initiator = rawBus.data.initiator;
+   method QPN sqpn                = rawBus.data.sqpn;
+   method WorkReqID wrID          = rawBus.data.wrID;
+   method Bool isRespErr          = rawBus.data.isRespErr;
+   method DataStream dataStream   = rawBus.data.dataStream;
+
+   method Action ready(Bool rdy);
+      rawBus.ready(rdy);
+   endmethod
+endmodule
+
+module mkRawDmaReadSrvBusSlave#(Put#(DmaReadReq) putIn)(RawDmaReadSrvBusSlave);
+   RawBusSlave#(DmaReadReq) rawBus <- mkPutToRawBusSlave(putIn, CF);
+
+   method Action validData(
+      Bool valid,
+      DmaReqSrcType initiator,
+      QPN sqpn,
+      WorkReqID wrID,
+      ADDR startAddr,
+      PktLen len,
+      IndexMR mrIdx
+      );
+      DmaReadReq dmaReadReq = DmaReadReq{
+         initiator  : initiator,
+         sqpn       : sqpn,
+         wrID       : wrID,
+         startAddr  : startAddr,
+         len        : len,
+         mrIdx      : mrIdx
+         };
+      rawBus.validData(valid, dmaReadReq);
+   endmethod
+
+   method Bool ready = rawBus.ready;
+endmodule
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 module mkRawDmaWriteCltBusMaster#(Get#(DmaWriteReq) getOut)(RawDmaWriteCltBusMaster);
    RawBusMaster#(DmaWriteReq) rawBus <- mkGetToRawBusMaster(getOut, CF);

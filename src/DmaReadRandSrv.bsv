@@ -12,8 +12,8 @@ import PrimUtils :: *;
 import Settings :: *;
 import Utils :: *;
 import Utils4Dma :: *;
+import PortConversion :: *;
 
-(* synthesize *)
 module mkDmaReadRandSrv(DmaReadSrv);
    FIFOF#(DmaReadReq)      dmaReadReqQ <- mkFIFOF;
    FIFOF#(DmaReadResp)    dmaReadRespQ <- mkFIFOF;
@@ -113,4 +113,23 @@ module mkDmaReadRandSrv(DmaReadSrv);
    endrule
 
    return toGPServer(dmaReadReqQ, dmaReadRespQ);
+endmodule
+
+interface AxiSDmaReadRandSrv;
+   // DMA Read
+   (* prefix = "m_dma_read" *)
+   interface RawDmaReadSrvBusMaster rawDmaReadSrvStreamOut;
+   (* prefix = "s_dma_read" *)
+   interface RawDmaReadSrvBusSlave rawDmaReadSrvStreamIn;
+endinterface
+
+(* synthesize *)
+module mkAxiSDmaReadRandSrv(AxiSDmaReadRandSrv);
+   DmaReadSrv dmaReadRandSrv <- mkDmaReadRandSrv;
+   
+   let rawDmaReadSrvStreamMst  <- mkRawDmaReadSrvBusMaster(dmaReadRandSrv.response);
+   let rawDmaReadSrvStreamSlv  <- mkRawDmaReadSrvBusSlave(dmaReadRandSrv.request);
+
+   interface rawDmaReadSrvStreamOut  = rawDmaReadSrvStreamMst;
+   interface rawDmaReadSrvStreamIn   = rawDmaReadSrvStreamSlv;
 endmodule
