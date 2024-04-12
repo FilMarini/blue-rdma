@@ -122,8 +122,7 @@ module mkNewPendingWorkReqPipeOut#(
             pendingNewWorkReqCnt > 0,
             "decrPendingNewWorkReqCnt assertion @ mkNewPendingWorkReqPipeOut",
             $format(
-                "pendingNewWorkReqCnt=%0d", fshow(pendingNewWorkReqCnt),
-                " should larger than zero when decrOne"
+                "pendingNewWorkReqCnt should larger than zero when decrOne"
             )
         );
         pendingNewWorkReqCnt.decrOne;
@@ -135,8 +134,7 @@ module mkNewPendingWorkReqPipeOut#(
             fromInteger(valueOf(MAX_QP_WR)) >= pendingNewWorkReqCnt,
             "pendingNewWorkReqCnt assertion @ mkNewPendingWorkReqPipeOut",
             $format(
-                "pendingNewWorkReqCnt=%0d", pendingNewWorkReqCnt,
-                " should be less than MAX_QP_WR=%0d", valueOf(MAX_QP_WR)
+                "pendingNewWorkReqCnt should be less than MAX_QP_WR=%0d", valueOf(MAX_QP_WR)
             )
         );
         // $display("time=%0t:", $time, " pendingNewWorkReqCnt=%0d", pendingNewWorkReqCnt);
