@@ -1,6 +1,6 @@
 // Adjustible settings
 // typedef 500 TARGET_FREQ_MHZ;
-typedef 2 TARGET_CYCLE_NS;
+typedef 6 TARGET_CYCLE_NS;
 
 typedef 2 MIN_PKT_NUM_IN_RECV_BUF;
 typedef TMul#(2, MAX_QP_WR) MAX_PENDING_WORK_COMP_NUM;
