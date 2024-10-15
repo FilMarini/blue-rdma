@@ -1,6 +1,6 @@
 // Adjustible settings
 // typedef 500 TARGET_FREQ_MHZ;
-typedef 2 TARGET_CYCLE_NS;
+typedef 6 TARGET_CYCLE_NS;
 
 typedef 2 MIN_PKT_NUM_IN_RECV_BUF;
 typedef TMul#(2, MAX_QP_WR) MAX_PENDING_WORK_COMP_NUM;
@@ -11,13 +11,13 @@ typedef 256 DATA_BUS_WIDTH;
 
 typedef TExp#(31)           MAX_MR_SIZE;   // 2GB
 typedef TExp#(21)           PAGE_SIZE_CAP; // 2MB
-typedef 4                   MAX_QP;
-typedef 32                  MAX_QP_WR;
-typedef 8                   MAX_SGE;
-typedef 8                   MAX_CQ;
+typedef 1                   MAX_QP;
+typedef 4                   MAX_QP_WR;
+typedef 1                   MAX_SGE;
+typedef 2                   MAX_CQ;
 typedef MAX_QP_WR           MAX_CQE;
-typedef 256                 MAX_MR;
-typedef 2                   MAX_PD;
+typedef 2                   MAX_MR;
+typedef 1                   MAX_PD;
 typedef TDiv#(MAX_QP_WR, 2) MAX_QP_RD_ATOM;
 typedef TDiv#(MAX_QP_WR, 2) MAX_QP_DST_RD_ATOM;
 typedef 0                   MAX_SRQ;

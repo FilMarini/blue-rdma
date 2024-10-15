@@ -127,7 +127,7 @@ interface ContextSQ;
 endinterface
 
 interface ContextRQ;
-    interface CntrlStatus statusRQ;
+    //CR interface CntrlStatus statusRQ;
 
     method PermCheckReq getPermCheckReq();
     method Action       setPermCheckReq(PermCheckReq permCheckReq);
@@ -966,12 +966,14 @@ module mkCntrlQP(CntrlQP);
     endinterface;
 
     interface contextRQ = interface ContextRQ;
+   /*CR
         interface statusRQ = interface CntrlStatus;
-            interface comm = getCntrlCommStatus;
-            method TypeQP getTypeQP() = rqTypeReg;
-            method Bool isSQ() = False;
-            // method Bool isRQ() = True;
+        interface comm = getCntrlCommStatus;
+           method TypeQP getTypeQP() = rqTypeReg;
+           method Bool isSQ() = False;
+           method Bool isRQ() = True;
         endinterface;
+   */
 
         method PermCheckReq getPermCheckReq() if (inited) = permCheckReqReg;
         method Action        setPermCheckReq(PermCheckReq permCheckReq) if (inited);

@@ -87,7 +87,7 @@ endinterface
 
 module mkWorkCompGenSQ#(
     CntrlStatus cntrlStatus,
-    Get#(PayloadConResp) payloadConRespPort,
+    //CR Get#(PayloadConResp) payloadConRespPort,
     // PipeOut#(PayloadConResp)   payloadConRespPipeIn,
     PipeOut#(WorkCompGenReqSQ) wcGenReqPipeInFromReqGenInSQ,
     PipeOut#(WorkCompGenReqSQ) wcGenReqPipeInFromRespHandleInSQ
@@ -133,9 +133,9 @@ module mkWorkCompGenSQ#(
                         genPendingWorkCompSQ, \
                         waitDmaDoneSQ, \
                         genWorkCompSQ, \
-                        noDmaWaitSQ, \
-                        errFlushSQ, \
-                        discardPayloadConRespSQ" *)
+                        noDmaWaitSQ" *)
+                        //CR errFlushSQ, \
+                        //CR discardPayloadConRespSQ" *)
     rule recvWorkCompGenReqSQ if (inNormalState || inErrorState);
         if (wcGenReqPipeInFromReqGenInSQ.notEmpty) begin
             let wcGenReqSQ = wcGenReqPipeInFromReqGenInSQ.first;
@@ -209,6 +209,7 @@ module mkWorkCompGenSQ#(
         // let workComp               = pendingWorkCompSQ.workComp;
         // let needWorkCompWhenNormal = pendingWorkCompSQ.needWorkCompWhenNormal;
 
+       /*CR
         if (isWorkCompSuccess && wcWaitDmaResp) begin
             // TODO: report error if waiting too long for DMA write response
             let payloadConResp <- payloadConRespPort.get;
@@ -227,6 +228,7 @@ module mkWorkCompGenSQ#(
                 )
             );
         end
+       */
 
         genWorkCompQ.enq(pendingWorkCompSQ);
     endrule
@@ -345,11 +347,13 @@ module mkWorkCompGenSQ#(
         // );
     endrule
 
+   /*CR
     rule discardPayloadConRespSQ if (inErrorState);
         let payloadConResp <- payloadConRespPort.get;
         // let payloadConResp = payloadConRespPipeIn.first;
         // payloadConRespPipeIn.deq;
     endrule
+   */
 
     interface workCompPipeOut = toPipeOut(workCompOutQ4SQ);
     method Bool hasErr() = workCompGenStateReg == WC_GEN_ST_ERR_FLUSH;

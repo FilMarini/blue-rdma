@@ -15,7 +15,7 @@ import PayloadConAndGen :: *;
 import PrimUtils :: *;
 import RetryHandleSQ :: *;
 import ReqGenSQ :: *;
-import ReqHandleRQ :: *;
+//CR import ReqHandleRQ :: *;
 import RespHandleSQ :: *;
 import Settings :: *;
 import SpecialFIFOF :: *;
@@ -122,8 +122,7 @@ module mkNewPendingWorkReqPipeOut#(
             pendingNewWorkReqCnt > 0,
             "decrPendingNewWorkReqCnt assertion @ mkNewPendingWorkReqPipeOut",
             $format(
-                "pendingNewWorkReqCnt=%0d", fshow(pendingNewWorkReqCnt),
-                " should larger than zero when decrOne"
+                "pendingNewWorkReqCnt should larger than zero when decrOne"
             )
         );
         pendingNewWorkReqCnt.decrOne;
@@ -135,8 +134,7 @@ module mkNewPendingWorkReqPipeOut#(
             fromInteger(valueOf(MAX_QP_WR)) >= pendingNewWorkReqCnt,
             "pendingNewWorkReqCnt assertion @ mkNewPendingWorkReqPipeOut",
             $format(
-                "pendingNewWorkReqCnt=%0d", pendingNewWorkReqCnt,
-                " should be less than MAX_QP_WR=%0d", valueOf(MAX_QP_WR)
+                "pendingNewWorkReqCnt should be less than MAX_QP_WR=%0d", valueOf(MAX_QP_WR)
             )
         );
         // $display("time=%0t:", $time, " pendingNewWorkReqCnt=%0d", pendingNewWorkReqCnt);
@@ -158,8 +156,8 @@ module mkSQ#(
     ContextSQ contextSQ,
     PayloadGenerator payloadGenerator,
     // DmaReadCntrl dmaReadCntrl,
-    DmaWriteCntrl dmaWriteCntrl,
-    PermCheckSrv permCheckSrv,
+    //CR DmaWriteCntrl dmaWriteCntrl,
+    //CR PermCheckSrv permCheckSrv,
     PipeOut#(WorkReq) workReqPipeIn,
     RdmaPktMetaDataAndPayloadPipeOut respPktPipeOut
 )(SQ);
@@ -182,12 +180,14 @@ module mkSQ#(
     // let payloadGenerator <- mkPayloadGenerator(
     //     contextSQ.statusSQ, dmaReadCntrl
     // );
+   /*CR
     let payloadConsumer <- mkPayloadConsumer(
         contextSQ.statusSQ,
         dmaWriteCntrl,
         respPktPipeOut.payload
         // respHandleSQ.payloadConReqPipeOut
     );
+   */
 
     let reqGenSQ <- mkReqGenSQ(
         contextSQ,
@@ -202,15 +202,15 @@ module mkSQ#(
     let respHandleSQ <- mkRespHandleSQ(
         contextSQ,
         retryHandler,
-        permCheckSrv,
+        //CR permCheckSrv,
         toPipeOut(pendingWorkReqBuf.fifof),
-        respPktPipeOut.pktMetaData,
-        payloadConsumer.request
+        respPktPipeOut.pktMetaData
+        //CR payloadConsumer.request
     );
 
     let workCompGenSQ <- mkWorkCompGenSQ(
         contextSQ.statusSQ,
-        payloadConsumer.response,
+        //CR payloadConsumer.response,
         // payloadConsumer.respPipeOut,
         reqGenSQ.workCompGenReqPipeOut,
         respHandleSQ.workCompGenReqPipeOut
@@ -252,6 +252,7 @@ module mkSQ#(
     // interface workCompPipeOutSQ = workCompPipeOut;
 endmodule
 
+/*CR
 interface RQ;
     interface DataStreamPipeOut rdmaRespDataStreamPipeOut;
     interface WorkCompGen workCompRQ;
@@ -315,6 +316,7 @@ module mkRQ#(
     // interface workCompPipeOutRQ = workCompGenRQ.workCompPipeOut;
     // interface workCompStatusPipeOutRQ = workCompGenRQ.workCompStatusPipeOutRQ;
 endmodule
+*/
 
 interface DmaArbiter4QP;
     interface DmaReadClt  dmaReadClt;
@@ -402,34 +404,34 @@ endmodule
 interface QueuePair;
     // Input
     interface SrvPortQP     srvPortQP;
-    interface Put#(RecvReq) recvReqIn;
+    //CR interface Put#(RecvReq) recvReqIn;
     interface Put#(WorkReq) workReqIn;
     // interface DmaReadClt    dmaReadClt;
     // interface DmaWriteClt   dmaWriteClt;
-    interface DmaReadClt    dmaReadClt4RQ;
-    interface DmaWriteClt   dmaWriteClt4RQ;
+    //CR interface DmaReadClt    dmaReadClt4RQ;
+    //CR interface DmaWriteClt   dmaWriteClt4RQ;
     interface DmaReadClt    dmaReadClt4SQ;
-    interface DmaWriteClt   dmaWriteClt4SQ;
-    interface PermCheckClt  permCheckClt4RQ;
-    interface PermCheckClt  permCheckClt4SQ;
-    interface RdmaPktMetaDataAndPayloadPipeIn reqPktPipeIn;
+    //CR interface DmaWriteClt   dmaWriteClt4SQ;
+    //CR interface PermCheckClt  permCheckClt4RQ;
+    //CR interface PermCheckClt  permCheckClt4SQ;
+    //CR interface RdmaPktMetaDataAndPayloadPipeIn reqPktPipeIn;
     interface RdmaPktMetaDataAndPayloadPipeIn respPktPipeIn;
     // Output
     interface CntrlStatus        statusSQ;
-    interface CntrlStatus        statusRQ;
+    //CR interface CntrlStatus        statusRQ;
     // interface DataStreamPipeOut  rdmaReqRespPipeOut;
     interface DataStreamPipeOut  rdmaReqPipeOut;
-    interface DataStreamPipeOut  rdmaRespPipeOut;
-    interface PipeOut#(WorkComp) workCompPipeOutRQ;
+    //CR interface DataStreamPipeOut  rdmaRespPipeOut;
+    //CR interface PipeOut#(WorkComp) workCompPipeOutRQ;
     interface PipeOut#(WorkComp) workCompPipeOutSQ;
 endinterface
 
 (* synthesize *)
 module mkQP(QueuePair);
     // TODO: change WR and RR queues to mkSizedFIFOF
-    FIFOF#(RecvReq) recvReqQ <- mkSizedFIFOF(valueOf(MAX_QP_WR));
+    //CR FIFOF#(RecvReq) recvReqQ <- mkSizedFIFOF(valueOf(MAX_QP_WR));
     FIFOF#(WorkReq) workReqQ <- mkFIFOF;
-    let recvReqBufPipeOut = toPipeOut(recvReqQ);
+    //CR let recvReqBufPipeOut = toPipeOut(recvReqQ);
     let workReqBufPipeOut = toPipeOut(workReqQ);
 
     Reg#(Bool)  sqDmaReadCancelReg <- mkReg(False);
@@ -440,35 +442,38 @@ module mkQP(QueuePair);
     let cntrl <- mkCntrlQP;
     // let dmaArbiter <- mkDmaArbiter4QP;
     DmaReadProxy   dmaReadProxy4SQ   <- mkServerProxy;
-    DmaWriteProxy  dmaWriteProxy4SQ  <- mkServerProxy;
-    DmaReadProxy   dmaReadProxy4RQ   <- mkServerProxy;
-    DmaWriteProxy  dmaWriteProxy4RQ  <- mkServerProxy;
-    PermCheckProxy permCheckProxy4RQ <- mkServerProxy;
-    PermCheckProxy permCheckProxy4SQ <- mkServerProxy;
+    //CR DmaWriteProxy  dmaWriteProxy4SQ  <- mkServerProxy;
+    //CR DmaReadProxy   dmaReadProxy4RQ   <- mkServerProxy;
+    //CR DmaWriteProxy  dmaWriteProxy4RQ  <- mkServerProxy;
+    //CR PermCheckProxy permCheckProxy4RQ <- mkServerProxy;
+    //CR PermCheckProxy permCheckProxy4SQ <- mkServerProxy;
 
-    let dmaReadCntrl4RQ <- mkDmaReadCntrl(
-        cntrl.contextRQ.statusRQ, dmaReadProxy4RQ.srvPort
-    );
-    let dmaWriteCntrl4RQ <- mkDmaWriteCntrl(
-        cntrl.contextRQ.statusRQ, dmaWriteProxy4RQ.srvPort
-    );
+    //CR  let dmaReadCntrl4RQ <- mkDmaReadCntrl(
+    //CR     cntrl.contextRQ.statusRQ, dmaReadProxy4RQ.srvPort
+    //CR );
+    //CR let dmaWriteCntrl4RQ <- mkDmaWriteCntrl(
+    //CR     cntrl.contextRQ.statusRQ, dmaWriteProxy4RQ.srvPort
+    //CR );
     let dmaReadCntrl4SQ <- mkDmaReadCntrl(
         cntrl.contextSQ.statusSQ, dmaReadProxy4SQ.srvPort
     );
+   /*CR
     let dmaWriteCntrl4SQ <- mkDmaWriteCntrl(
         cntrl.contextSQ.statusSQ, dmaWriteProxy4SQ.srvPort
     );
+   */
 
-    let payloadGenerator4RQ <- mkPayloadGenerator(
-        cntrl.contextRQ.statusRQ, dmaReadCntrl4RQ
-    );
+    //CR let payloadGenerator4RQ <- mkPayloadGenerator(
+    //CR     cntrl.contextRQ.statusRQ, dmaReadCntrl4RQ
+    //CR );
     let payloadGenerator4SQ <- mkPayloadGenerator(
         cntrl.contextSQ.statusSQ, dmaReadCntrl4SQ
     );
 
-    let reqPktPipe  <- mkRdmaPktMetaDataAndPayloadPipe;
+    //CR let reqPktPipe  <- mkRdmaPktMetaDataAndPayloadPipe;
     let respPktPipe <- mkRdmaPktMetaDataAndPayloadPipe;
 
+   /*CR
     let rq <- mkRQ(
         cntrl.contextRQ,
         payloadGenerator4RQ,
@@ -478,13 +483,14 @@ module mkQP(QueuePair);
         recvReqBufPipeOut,
         reqPktPipe.pktPipeOut
     );
+   */
 
     let sq <- mkSQ(
         cntrl.contextSQ,
         payloadGenerator4SQ,
         // dmaReadCntrl4SQ,
-        dmaWriteCntrl4SQ,
-        permCheckProxy4SQ.srvPort,
+        //CR dmaWriteCntrl4SQ,
+        //CR permCheckProxy4SQ.srvPort,
         workReqBufPipeOut,
         respPktPipe.pktPipeOut
     );
@@ -494,10 +500,10 @@ module mkQP(QueuePair);
 
     (* no_implicit_conditions, fire_when_enabled *)
     rule resetAndClear if (cntrl.contextSQ.statusSQ.comm.isReset);
-        recvReqQ.clear;
+        //CR recvReqQ.clear;
         workReqQ.clear;
 
-        reqPktPipe.clear;
+        //CR reqPktPipe.clear;
         respPktPipe.clear;
 
         sqDmaReadCancelReg  <= False;
@@ -509,11 +515,12 @@ module mkQP(QueuePair);
 
     rule errTrigger if (
         cntrl.contextSQ.statusSQ.comm.isNonErr &&
-        (rq.workCompRQ.hasErr || sq.workCompSQ.hasErr)
+        (sq.workCompSQ.hasErr)
     );
         cntrl.setStateErr;
     endrule
 
+   /*CR
     (* no_implicit_conditions, fire_when_enabled *)
     rule cancelDmaReadRQ if (
         !rqDmaReadCancelReg                 &&
@@ -530,6 +537,7 @@ module mkQP(QueuePair);
         //     ", recvReqQ.notEmpty=", fshow(recvReqQ.notEmpty)
         // );
     endrule
+   */
 
     (* no_implicit_conditions, fire_when_enabled *)
     rule cancelDmaReadSQ if (
@@ -548,35 +556,39 @@ module mkQP(QueuePair);
         // );
     endrule
 
+   /* CR
     (* no_implicit_conditions, fire_when_enabled *)
     rule cancelDmaWriteRQ if (cntrl.contextSQ.statusSQ.comm.isERR);
         // TODO: support graceful stop for DMA write
         dmaWriteCntrl4RQ.dmaCntrl.cancel;
         rqDmaWriteCancelReg <= True;
     endrule
+   */
 
+   /*CR
     (* no_implicit_conditions, fire_when_enabled *)
     rule cancelDmaWriteSQ if (cntrl.contextSQ.statusSQ.comm.isERR);
         // TODO: support graceful stop for DMA write
         dmaWriteCntrl4SQ.dmaCntrl.cancel;
         sqDmaWriteCancelReg <= True;
     endrule
+   */
 
     // (* no_implicit_conditions, fire_when_enabled *)
     (* fire_when_enabled *)
     rule waitGracefulStop if (
         cntrl.contextSQ.statusSQ.comm.isERR &&
-        !recvReqQ.notEmpty                  &&
+        //CR !recvReqQ.notEmpty                  &&
         !workReqQ.notEmpty                  &&
         !sq.pendingWorkReqNotEmpty          &&
         rqDmaReadCancelReg                  &&
         rqDmaWriteCancelReg                 &&
         sqDmaReadCancelReg                  &&
-        sqDmaWriteCancelReg                 &&
-        dmaReadCntrl4RQ.dmaCntrl.isIdle     &&
-        dmaWriteCntrl4RQ.dmaCntrl.isIdle    &&
-        dmaReadCntrl4SQ.dmaCntrl.isIdle     &&
-        dmaWriteCntrl4SQ.dmaCntrl.isIdle
+        //CR sqDmaWriteCancelReg                 &&
+        //CA dmaReadCntrl4RQ.dmaCntrl.isIdle     &&
+        //CA dmaWriteCntrl4RQ.dmaCntrl.isIdle    &&
+        dmaReadCntrl4SQ.dmaCntrl.isIdle
+        //CR dmaWriteCntrl4SQ.dmaCntrl.isIdle
     );
         // Notify controller when graceful stop
         cntrl.errFlushDone;
@@ -629,24 +641,24 @@ module mkQP(QueuePair);
     endrule
 */
     interface srvPortQP       = cntrl.srvPort;
-    interface recvReqIn       = toPut(recvReqQ);
+    //CR interface recvReqIn       = toPut(recvReqQ);
     interface workReqIn       = toPut(workReqQ);
     // interface dmaReadClt      = dmaArbiter.dmaReadClt;
     // interface dmaWriteClt     = dmaArbiter.dmaWriteClt;
-    interface dmaReadClt4RQ   = dmaReadProxy4RQ.cltPort;
-    interface dmaWriteClt4RQ  = dmaWriteProxy4RQ.cltPort;
+    //CR interface dmaReadClt4RQ   = dmaReadProxy4RQ.cltPort;
+    //CR interface dmaWriteClt4RQ  = dmaWriteProxy4RQ.cltPort;
     interface dmaReadClt4SQ   = dmaReadProxy4SQ.cltPort;
-    interface dmaWriteClt4SQ  = dmaWriteProxy4SQ.cltPort;
-    interface permCheckClt4RQ = permCheckProxy4RQ.cltPort;
-    interface permCheckClt4SQ = permCheckProxy4SQ.cltPort;
-    interface reqPktPipeIn    = reqPktPipe.pktPipeIn;
+    //CR interface dmaWriteClt4SQ  = dmaWriteProxy4SQ.cltPort;
+    //CR interface permCheckClt4RQ = permCheckProxy4RQ.cltPort;
+    //CR interface permCheckClt4SQ = permCheckProxy4SQ.cltPort;
+    //CR interface reqPktPipeIn    = reqPktPipe.pktPipeIn;
     interface respPktPipeIn   = respPktPipe.pktPipeIn;
 
     interface statusSQ           = cntrl.contextSQ.statusSQ;
-    interface statusRQ           = cntrl.contextRQ.statusRQ;
+    //CR interface statusRQ           = cntrl.contextRQ.statusRQ;
     // interface rdmaReqRespPipeOut = reqRespPipeOut;
-    interface rdmaRespPipeOut    = rq.rdmaRespDataStreamPipeOut;
+    //CR interface rdmaRespPipeOut    = rq.rdmaRespDataStreamPipeOut;
     interface rdmaReqPipeOut     = sq.rdmaReqDataStreamPipeOut;
-    interface workCompPipeOutRQ  = rq.workCompRQ.workCompPipeOut;
+    //CR interface workCompPipeOutRQ  = rq.workCompRQ.workCompPipeOut;
     interface workCompPipeOutSQ  = sq.workCompSQ.workCompPipeOut;
 endmodule

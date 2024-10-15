@@ -119,10 +119,10 @@ endinterface
 module mkRespHandleSQ#(
     ContextSQ contextSQ,
     RetryHandleSQ retryHandler,
-    PermCheckSrv permCheckSrv,
+    //CR PermCheckSrv permCheckSrv,
     PipeOut#(PendingWorkReq) pendingWorkReqPipeIn,
-    PipeOut#(RdmaPktMetaData) pktMetaDataPipeIn,
-    Put#(PayloadConReq) payloadConReqPort
+    PipeOut#(RdmaPktMetaData) pktMetaDataPipeIn
+    //CR Put#(PayloadConReq) payloadConReqPort
 )(RespHandleSQ);
     // Output FIFO for PipeOut
     // FIFOF#(PayloadConReq)     payloadConReqOutQ <- mkFIFOF;
@@ -760,6 +760,7 @@ module mkRespHandleSQ#(
         let isZeroPayloadLen = pktMetaData.isZeroPayloadLen;
 
         let expectPermCheckResp = False;
+       /*CR
         if (respAction == SQ_ACT_EXPLICIT_NORMAL_RESP) begin
             if (
                 isFirstOrOnlyPkt && !inErrState &&
@@ -780,6 +781,7 @@ module mkRespHandleSQ#(
                 expectPermCheckResp = True;
             end
         end
+       */
 
         pendingRetryCheckQ.enq(tuple6(
             pendingWR, pktMetaData, respPktInfo, respAction, wcReqType, expectPermCheckResp
@@ -939,6 +941,7 @@ module mkRespHandleSQ#(
                 );
             end
 
+           /*CR
             if (expectPermCheckResp) begin
                 let mrCheckResult <- permCheckSrv.response.get;
                 if (!mrCheckResult) begin
@@ -950,6 +953,7 @@ module mkRespHandleSQ#(
                     respPktInfo.shouldDiscard = True;
                 end
             end
+           */
         end
 
         // pendingLenCalcQ.enq(tuple6(
@@ -983,6 +987,7 @@ module mkRespHandleSQ#(
         let readRespPktNum        = readRespPktNumReg;
         let oneAsPSN              = 1;
 
+       /*CR
         if (isReadResp) begin
             case ( { pack(isOnlyPkt), pack(isFirstPkt), pack(isMidPkt), pack(isLastPkt) } )
                 4'b1000: begin // isOnlyRdmaOpCode(bth.opcode)
@@ -1020,6 +1025,7 @@ module mkRespHandleSQ#(
                 readRespPktNumReg        <= readRespPktNum;
             end
         end
+       */
 
         pendingLenCalcQ.enq(tuple7(
             pendingWR, pktMetaData, respPktInfo, respAction,
@@ -1055,6 +1061,7 @@ module mkRespHandleSQ#(
         let remainingReadRespLen  = remainingReadRespLenReg;
         let oneAsPSN              = 1;
 
+       /*CR
         if (isReadResp) begin
             case ( { pack(isOnlyPkt), pack(isFirstPkt), pack(isMidPkt), pack(isLastPkt) } )
                 4'b1000: begin // isOnlyRdmaOpCode(bth.opcode)
@@ -1086,6 +1093,7 @@ module mkRespHandleSQ#(
                 remainingReadRespLenReg <= remainingReadRespLen;
             end
         end
+        */
 
         let respLenCheckResult = RespLenCheckResult {
             enoughDmaSpace       : False,
@@ -1128,6 +1136,7 @@ module mkRespHandleSQ#(
         let enoughDmaSpace        = True;
         let isLastPayloadLenZero  = False;
 
+       /*
         if (isReadResp) begin
             case ( { pack(isOnlyPkt), pack(isFirstPkt), pack(isMidPkt), pack(isLastPkt) } )
                 4'b1000: begin // isOnlyRdmaOpCode(bth.opcode)
@@ -1178,6 +1187,7 @@ module mkRespHandleSQ#(
                 end
             endcase
         end
+       */
 
         // let respLenCheckResult = RespLenCheckResult {
         //     enoughDmaSpace       : enoughDmaSpace,
@@ -1219,6 +1229,7 @@ module mkRespHandleSQ#(
         let nextReadRespWriteAddr = respLenCheckResult.nextReadRespWriteAddr;
         let remainingReadRespLen  = respLenCheckResult.remainingReadRespLen;
 
+       /*CR
         if (isReadResp && respAction == SQ_ACT_EXPLICIT_NORMAL_RESP && !inErrState) begin
             let readRespLenMatch = isLastOrOnlyPkt ? isZero(remainingReadRespLen) : True;
             if (!enoughDmaSpace || !readRespLenMatch || isLastPayloadLenZero) begin
@@ -1232,6 +1243,7 @@ module mkRespHandleSQ#(
                 respPktInfo.shouldDiscard = True;
             end
         end
+        */
 
         pendingDmaReqQ.enq(tuple7(
             pendingWR, pktMetaData, respPktInfo, respAction,
@@ -1266,6 +1278,7 @@ module mkRespHandleSQ#(
         let isZeroPayloadLen = pktMetaData.isZeroPayloadLen;
 
         let wcWaitDmaResp = False;
+       /*CR
         if (respAction == SQ_ACT_EXPLICIT_NORMAL_RESP) begin
             if (!inErrState) begin
                 if (isReadResp && !isZeroPayloadLen) begin
@@ -1323,6 +1336,7 @@ module mkRespHandleSQ#(
             // payloadConReqOutQ.enq(payloadDiscardReq);
             payloadConReqPort.put(payloadDiscardReq);
         end
+       */
 
         immAssert(
             !hasLocalErr || genWorkComp,
