@@ -812,13 +812,13 @@ module mkInputRdmaPktBufAndHeaderValidation#(
                 payloadOutputQ.enq(tuple3(payloadFrag, qpIndex, isRespPkt));
                 // $display("time=%0t: payloadFrag=", $time, fshow(payloadFrag));
             end
-            else begin
+            //else begin
                 // Discard zero length payload no matter packet has payload or not
-                $info(
-                    "time=%0t: InputRdmaPktBuf checkPktLen", $time,
-                    ", discard zero-length payload for RDMA packet"
-                );
-            end
+                //$info(
+                //    "time=%0t: InputRdmaPktBuf checkPktLen", $time,
+                //    ", discard zero-length payload for RDMA packet"
+                //);
+            //end
 
             if (pktValid) begin
                 pktValid = (isFirstOrMidPkt && isPktLenEqPMTU) ||
