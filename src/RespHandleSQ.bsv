@@ -708,9 +708,13 @@ module mkRespHandleSQ#(
                     RETRY_REASON_IMPLICIT : getRetryReasonFromAETH(aeth);
                 let rnrTimer = (retryReason == RETRY_REASON_RNR) ?
                         (tagged Valid aeth.value) : (tagged Invalid);
+
+		let retryStartPSN = isReadOrAtomicWorkReq(pendingWR.wr.opcode) ?
+        		bth.psn : unwrapMaybe(pendingWR.startPSN);
+
                 let retryReq = RetryReq {
                     wrID         : pendingWR.wr.id,
-                    retryStartPSN: bth.psn,
+                    retryStartPSN: retryStartPSN,
                     retryReason  : retryReason,
                     retryRnrTimer: rnrTimer
                 };

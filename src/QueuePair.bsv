@@ -435,9 +435,9 @@ module mkQP(QueuePair);
     let workReqBufPipeOut = toPipeOut(workReqQ);
 
     Reg#(Bool)  sqDmaReadCancelReg <- mkReg(False);
-    Reg#(Bool)  rqDmaReadCancelReg <- mkReg(False);
+    //CR Reg#(Bool)  rqDmaReadCancelReg <- mkReg(False);
     Reg#(Bool) sqDmaWriteCancelReg <- mkReg(False);
-    Reg#(Bool) rqDmaWriteCancelReg <- mkReg(False);
+    //CR Reg#(Bool) rqDmaWriteCancelReg <- mkReg(False);
 
     let cntrl <- mkCntrlQP;
     // let dmaArbiter <- mkDmaArbiter4QP;
@@ -507,9 +507,9 @@ module mkQP(QueuePair);
         respPktPipe.clear;
 
         sqDmaReadCancelReg  <= False;
-        rqDmaReadCancelReg  <= False;
+        //CR rqDmaReadCancelReg  <= False;
         sqDmaWriteCancelReg <= False;
-        rqDmaWriteCancelReg <= False;
+        //CR rqDmaWriteCancelReg <= False;
         // $display("time=%0t: reset and clear mkQueuePair", $time);
     endrule
 
@@ -581,8 +581,8 @@ module mkQP(QueuePair);
         //CR !recvReqQ.notEmpty                  &&
         !workReqQ.notEmpty                  &&
         !sq.pendingWorkReqNotEmpty          &&
-        rqDmaReadCancelReg                  &&
-        rqDmaWriteCancelReg                 &&
+        //CR rqDmaReadCancelReg                  &&
+        //CR rqDmaWriteCancelReg                 &&
         sqDmaReadCancelReg                  &&
         //CR sqDmaWriteCancelReg                 &&
         //CA dmaReadCntrl4RQ.dmaCntrl.isIdle     &&
