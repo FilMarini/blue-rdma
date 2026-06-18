@@ -92,6 +92,7 @@ module mkRetryHandleSQ#(
     // Reg#(Bool)         isTimeOutCntZeroReg <- mkRegU;
     Reg#(Bool)           disableTimeOutReg <- mkRegU;
     Reg#(Bool)          disableRetryCntReg <- mkRegU;
+    Reg#(Bool)            disableRnrCntReg <- mkRegU;
 
     Reg#(RetryReason)    retryReasonReg <- mkRegU;
     Reg#(WorkReqID)   retryWorkReqIdReg <- mkRegU;
@@ -135,7 +136,7 @@ module mkRetryHandleSQ#(
 
     function Bool retryCntExceedLimit(RetryReason retryReason);
         return case (retryReason)
-            RETRY_REASON_RNR     : isZero(rnrCntReg);
+            RETRY_REASON_RNR     : !disableRnrCntReg && isZero(rnrCntReg);
             RETRY_REASON_SEQ_ERR ,
             RETRY_REASON_IMPLICIT,
             RETRY_REASON_TIMEOUT : isZero(retryCntReg);
@@ -157,7 +158,7 @@ module mkRetryHandleSQ#(
                     end
                 end
                 RETRY_REASON_RNR: begin
-                    if (!disableRetryCntReg) begin
+                    if (!disableRnrCntReg) begin
                         if (!isZero(rnrCntReg)) begin
                             rnrCntReg <= rnrCntReg - 1;
                         end
@@ -182,6 +183,7 @@ module mkRetryHandleSQ#(
             retryCntReg        <= cntrlStatus.comm.getMaxRetryCnt;
             rnrCntReg          <= cntrlStatus.comm.getMaxRnrCnt;
             disableRetryCntReg <= cntrlStatus.comm.getMaxRetryCnt == fromInteger(valueOf(INFINITE_RETRY));
+            disableRnrCntReg   <= cntrlStatus.comm.getMaxRnrCnt == fromInteger(valueOf(INFINITE_RETRY));
             // $display(
             //     "time=%0t: resetRetryCntInternal cntrlStatus.comm.getMaxRetryCnt=%0d",
             //     $time, cntrlStatus.comm.getMaxRetryCnt
