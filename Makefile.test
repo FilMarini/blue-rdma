@@ -1,9 +1,20 @@
 TESTDIR ?= $(abspath ../test)
 LOGDIR ?= $(abspath ../tmp)
 
+# NOTE: The receive-queue (RQ) datapath is currently disabled in the source
+# (//CR / /*CR*/ markers in QueuePair.bsv, Controller.bsv, InputPktHandle.bsv,
+# WorkCompGen.bsv). The following whole-file testbenches exercise only the RQ
+# path or the RQ<->SQ loopback and cannot run until RQ is re-enabled, so they
+# are de-registered here. Their sources are preserved verbatim on disk; to
+# revive them, re-enable the RQ source and re-add the lines below:
+#            SimExtractRdmaHeaderPayload.bsv \  (request-ingress only)
+#            TestQueuePair.bsv \                (SQ<->RQ loopback integration)
+#            TestReqHandleRQ.bsv \              (RQ request handling)
+#            TestTransportLayer.bsv \           (SQ<->RQ loopback integration)
+# (SimExtractRdmaHeaderPayload.bsv remains imported as a library by other tests;
+#  it is only removed as a standalone testbench target.)
 TESTBENCHS = \
             SimDma.bsv \
-            SimExtractRdmaHeaderPayload.bsv \
             SimGenRdmaReqResp.bsv \
             TestArbitration.bsv \
             TestController.bsv \
@@ -12,13 +23,10 @@ TESTBENCHS = \
             TestInputPktHandle.bsv \
             TestMetaData.bsv \
             TestPayloadConAndGen.bsv \
-            TestQueuePair.bsv \
             TestReqGenSQ.bsv \
-            TestReqHandleRQ.bsv \
             TestRespHandleSQ.bsv \
             TestRetryHandleSQ.bsv \
             TestSpecialFIFOF.bsv \
-            TestTransportLayer.bsv \
             TestUtils.bsv \
             TestWorkCompGen.bsv \
             TestPayloadGen.bsv \
@@ -39,10 +47,10 @@ TestExtractAndPrependPipeOut.bsv = mkTestHeaderAndDataStreamConversion \
                                     mkTestExtractHeaderWithPayloadLessThanOneFrag \
                                     mkTestExtractHeaderLongerThanDataStream \
                                     mkTestExtractAndPrependHeader
-TestInputPktHandle.bsv           = mkTestCalculateRandomPktLen \
-                                    mkTestCalculatePktLenEqPMTU \
-                                    mkTestCalculateZeroPktLen \
-                                    mkTestReceiveCNP
+# mkTestCalculate{RandomPktLen,PktLenEqPMTU,ZeroPktLen} exercise the disabled
+# request-ingress path (reqPktPipeOut) and deadlock; only the CNP receive test
+# runs until RQ/request ingress is re-enabled.
+TestInputPktHandle.bsv           = mkTestReceiveCNP
 TestMetaData.bsv                 = mkTestMetaDataMRs \
                                     mkTestMetaDataPDs \
                                     mkTestMetaDataQPs \
@@ -100,9 +108,9 @@ TestSpecialFIFOF.bsv             = mkTestCacheFIFO2 \
 TestTransportLayer.bsv           = mkTestTransportLayerNormalCase \
                                     mkTestTransportLayerErrorCase
 TestUtils.bsv                    = mkTestPsnFunc
-TestWorkCompGen.bsv              = mkTestWorkCompGenNormalCaseRQ \
-                                    mkTestWorkCompGenErrFlushCaseRQ \
-                                    mkTestWorkCompGenNormalCaseSQ \
+# mkTestWorkCompGen*RQ cover the disabled RQ work-completion path (their module
+# bodies are stubbed in TestWorkCompGen.bsv); only the SQ cases are run.
+TestWorkCompGen.bsv              = mkTestWorkCompGenNormalCaseSQ \
                                     mkTestWorkCompGenErrFlushCaseSQ
 
 TestPayloadGen.bsv               = mkTestCalcPktNumAndPktLenByAddrAndPMTU \
