@@ -570,20 +570,24 @@ module mkRetryHandleSQ#(
             retryHandleStateReg <= RETRY_HANDLE_ST_CHECK_PARTIAL_RETRY_WR;
         end
 
+        // Re-arm the pending-WR scan from the queue head. The scan FIFO has three
+        // modes and each needs a different (or no) command -- a 2-way isScanDone
+        // branch deadlocks when this rule is re-entered by a NESTED retry (a 2nd
+        // RNR/NAK arriving during RNR_WAIT re-runs initRetry -> START_PRE_RETRY)
+        // while the FIFO is parked in PRE_SCAN_MODE: isScanDone is false there, so
+        // the old code issued preScanRestart(), whose implicit guard is inScanMode
+        // -- unsatisfiable in PRE_SCAN_MODE -- and the retry FSM wedges forever
+        // (dispatch + completions stall until a full QP/source drain). In
+        // PRE_SCAN_MODE the pre-scan is already armed at the head, so no command is
+        // needed; only FIFOF_MODE needs preScanStart and SCAN_MODE needs
+        // preScanRestart.
         if (pendingWorkReqScanCntrl.isScanDone) begin
             pendingWorkReqScanCntrl.preScanStart;
-            // $display(
-            //     "time=%0t: pendingWorkReqScanCntrl.preScanStart", $time,
-            //     " pendingWorkReqNotEmpty=", fshow(pendingWorkReqNotEmpty)
-            // );
         end
-        else begin
+        else if (pendingWorkReqScanCntrl.isScanMode) begin
             pendingWorkReqScanCntrl.preScanRestart;
-            // $display(
-            //     "time=%0t: pendingWorkReqScanCntrl.preScanRestart", $time,
-            //     " pendingWorkReqNotEmpty=", fshow(pendingWorkReqNotEmpty)
-            // );
         end
+        // else: already in PRE_SCAN_MODE (nested retry) -- head is armed, no-op.
         // $display(
         //     "time=%0t: startPreRetry", $time,
         //     ", retryHandleStateReg=", fshow(retryHandleStateReg),

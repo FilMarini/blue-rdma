@@ -22,7 +22,7 @@ interface ScanCntrl#(type anytype);
     method Bool hasScanOut();
     method Bool isScanDone();
     method Bool deqPulse();
-    // method Bool isScanMode();
+    method Bool isScanMode();
 endinterface
 
 interface ScanFIFOF#(numeric type qSz, type anytype);
@@ -491,7 +491,7 @@ module mkScanFIFOF(ScanFIFOF#(qSz, anytype)) provisos(
         method Bool hasScanOut() = !inFifoMode || scanOutQ.notEmpty;
         method Bool isScanDone() = inFifoMode;
         method Bool   deqPulse() = popReg[1];
-        // method Bool isScanMode() = inScanMode;
+        method Bool isScanMode() = inScanMode;
     endinterface;
 
     interface scanPipeOut = toPipeOut(scanOutQ);

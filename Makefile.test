@@ -30,7 +30,8 @@ TESTBENCHS = \
             TestUtils.bsv \
             TestWorkCompGen.bsv \
             TestPayloadGen.bsv \
-            TestSendQ.bsv
+            TestSendQ.bsv \
+            TestSqRnrThroughput.bsv
 
 SimDma.bsv                       = mkTestFixedPktLenDataStreamPipeOut \
                                     mkTestDmaReadAndWriteSrv
@@ -132,6 +133,9 @@ TestSendQ.bsv                    = mkTestSendQueueRawPktCase \
                                     mkTestSendQueueNormalCase \
                                     mkTestSendQueueNoPayloadCase \
                                     mkTestSendQueueZeroPayloadLenCase
+
+TestSqRnrThroughput.bsv          = mkTestSqNoRnrBaselineCase \
+                                    mkTestSqRnrThroughputCase
 
 all: $(TESTBENCHS)
 
