@@ -184,13 +184,21 @@ module mkScanFIFOF(ScanFIFOF#(qSz, anytype)) provisos(
                 )
             );
             scanStateReg <= SCAN_Q_PRE_SCAN_MODE;
+            // Clear any stale scan-output ONLY when (re)arming a fresh scan. The old
+            // code cleared scanOutQ unconditionally every fifoMode cycle, which on a
+            // normal scanDone->fifoMode transition flushed the up-to-2 replayed items
+            // still buffered in scanOutQ (its mkFIFOF depth) before mkReqGenSQ could
+            // drain them -> those WRs were dropped from the replay, leaving a PSN gap
+            // each retry and a self-perpetuating ~2x retransmit treadmill after RNR.
+            // The abort paths (stopScan / preScanRestart) already clear scanOutQ in
+            // scanModeStateChange, so this is the only place that needed gating.
+            scanOutQ.clear;
             // $display(
             //     "time=%0t:", $time,
             //     " fifoMode change to state=", fshow(SCAN_Q_PRE_SCAN_MODE)
             // );
         end
 
-        scanOutQ.clear;
         headReg <= tagged Invalid;
         preScanStartReg[1] <= False;
     endrule
