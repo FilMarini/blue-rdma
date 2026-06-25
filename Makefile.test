@@ -135,7 +135,9 @@ TestSendQ.bsv                    = mkTestSendQueueRawPktCase \
                                     mkTestSendQueueZeroPayloadLenCase
 
 TestSqRnrThroughput.bsv          = mkTestSqNoRnrBaselineCase \
-                                    mkTestSqRnrThroughputCase
+                                    mkTestSqRnrThroughputCase \
+                                    mkTestSqTailDropNoRnrCase \
+                                    mkTestSqTailDropCase
 
 all: $(TESTBENCHS)
 
