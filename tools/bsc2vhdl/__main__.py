@@ -7,6 +7,16 @@ first; only when both are complete are they written to a temporary file in
 the target directory and moved into place with `os.replace`. A refused
 construct prints its message to stderr, writes nothing for that input, and
 the process continues to the remaining inputs before exiting nonzero.
+
+`--survey` switches to census mode: every input is walked with
+`survey_module` instead of emitted, `--out-dir` is not needed and no
+directory is ever created, and every out-of-subset construct in a file is
+reported rather than only the first. A completed census exits 0 even when
+it found refusals, since finding refusals is a successful census; the
+machine-readable signal is the printed total line, not the exit status. A
+genuine tool error (an unreadable file, a pyverilog parse failure) still
+propagates and exits nonzero. `--survey` and `--manifest` are mutually
+exclusive: a census produces no outputs to record.
 """
 from __future__ import annotations
 
@@ -22,15 +32,22 @@ from . import instantiate as _instantiate
 from .emit import emit_vhdl
 from .errors import UnsupportedConstruct
 from .mangle import NameMap
-from .parser import parse_module
+from .parser import parse_module, survey_module
 from .provenance import ManifestEntry, build_manifest, manifest_entry
 
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python -m tools.bsc2vhdl")
     parser.add_argument("inputs", nargs="+", help="one or more BSC-generated .v files")
-    parser.add_argument("--out-dir", required=True, help="directory to write .vhd and .namemap.json output into")
+    parser.add_argument(
+        "--out-dir", default=None, help="directory to write .vhd and .namemap.json output into"
+    )
     parser.add_argument("--manifest", default=None, help="path to write a provenance manifest JSON")
+    parser.add_argument(
+        "--survey",
+        action="store_true",
+        help="census mode: report every out-of-subset construct per input, writing nothing",
+    )
     parser.add_argument("--version", action="version", version=f"bsc2vhdl {__version__}")
     return parser
 
@@ -82,8 +99,33 @@ def _process_one(input_path: Path, out_dir: Path) -> ManifestEntry:
     return manifest_entry(input_path, vhdl_path.name, vhdl_text)
 
 
+def _run_survey(inputs: list[str]) -> int:
+    """Census mode: report every out-of-subset construct per input and
+    write nothing. Returns 0 unconditionally; a completed census is a
+    successful census regardless of how many refusals it found."""
+    total = 0
+    for raw_input in inputs:
+        refusals = survey_module(Path(raw_input))
+        for refusal in refusals:
+            print(str(refusal))
+        print(f"survey: {len(refusals)} refusal(s) in {raw_input}")
+        total += len(refusals)
+    print(f"survey total: {total} refusal(s) across {len(inputs)} file(s)")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
-    args = _build_parser().parse_args(argv)
+    parser = _build_parser()
+    args = parser.parse_args(argv)
+
+    if args.survey:
+        if args.manifest is not None:
+            parser.error("--survey and --manifest cannot be combined: a census produces no outputs to record")
+        return _run_survey(args.inputs)
+
+    if args.out_dir is None:
+        parser.error("--out-dir is required unless --survey is given")
+
     out_dir = Path(args.out_dir).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
 

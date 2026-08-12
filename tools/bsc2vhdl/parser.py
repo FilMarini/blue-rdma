@@ -80,8 +80,7 @@ _COMPARISON_TEXT = {
 }
 
 
-def parse_module(path: Path) -> ModuleIR:
-    path = Path(path)
+def _parse_ast(path: Path):
     # `outputdir` keeps PLY's cached parser-table files (parser.out,
     # parsetab.py) out of whatever directory this process happens to be run
     # from; the tool has no default output directory of its own to write
@@ -89,11 +88,61 @@ def parse_module(path: Path) -> ModuleIR:
     ast_root, _directives = _pyverilog_parse(
         [str(path)], preprocess_define=[], debug=False, outputdir=tempfile.gettempdir()
     )
+    return ast_root
 
+
+def _single_module_def(ast_root, path: Path):
     module_defs = [item for item in ast_root.description.definitions if isinstance(item, vast.ModuleDef)]
     if len(module_defs) != 1:
         raise UnsupportedConstruct("source file with other than one module", path, 0)
-    module_def = module_defs[0]
+    return module_defs[0]
+
+
+def _dispatch_item(
+    item, path, params, localparams, port_directions, port_widths, signals, always_blocks, initials, assigns,
+    instances,
+) -> None:
+    """Handle one top-level module item.
+
+    Shared by `parse_module` (raise-on-first-refusal) and `survey_module`
+    (collect-all-refusals): both walk `module_def.items` calling this once
+    per item, differing only in whether a raised `UnsupportedConstruct`
+    propagates or is caught by the caller so the walk continues.
+    """
+    if isinstance(item, vast.Decl):
+        for decl in item.list:
+            _handle_decl(decl, path, params, localparams, port_directions, port_widths, signals, assigns)
+    elif isinstance(item, vast.Always):
+        _check_always_sensitivity(item, path)
+        always_blocks.append(item)
+    elif isinstance(item, vast.Assign):
+        assigns.append(item)
+    elif isinstance(item, vast.InstanceList):
+        instances.extend(_handle_instance_list(item, path))
+    elif _strip.is_simulation_only(item):
+        initials.append(item)
+    else:
+        raise UnsupportedConstruct(type(item).__name__, path, getattr(item, "lineno", 0))
+
+
+def _dispatch_port(port, path, port_directions, port_widths) -> PortDecl:
+    """Handle one port-list entry. Shared by `parse_module` and
+    `survey_module` for the same reason `_dispatch_item` is."""
+    if isinstance(port, vast.Ioport):
+        raise UnsupportedConstruct("Ioport", path, getattr(port, "lineno", 0))
+    if getattr(port, "dimensions", None) is not None:
+        raise UnsupportedConstruct("port dimension list", path, getattr(port, "lineno", 0))
+    name = port.name
+    direction = port_directions.get(name)
+    if direction is None:
+        raise UnsupportedConstruct(f"port {name!r} never declared a direction", path, getattr(port, "lineno", 0))
+    msb, lsb = port_widths.get(name, (None, None))
+    return PortDecl(name=name, direction=direction, msb_expr=msb, lsb_expr=lsb, is_scalar=msb is None)
+
+
+def parse_module(path: Path) -> ModuleIR:
+    path = Path(path)
+    module_def = _single_module_def(_parse_ast(path), path)
 
     params: list[ParamDecl] = []
     localparams: list[LocalparamDecl] = []
@@ -106,33 +155,14 @@ def parse_module(path: Path) -> ModuleIR:
     instances: list = []
 
     for item in module_def.items:
-        if isinstance(item, vast.Decl):
-            for decl in item.list:
-                _handle_decl(decl, path, params, localparams, port_directions, port_widths, signals, assigns)
-        elif isinstance(item, vast.Always):
-            _check_always_sensitivity(item, path)
-            always_blocks.append(item)
-        elif isinstance(item, vast.Assign):
-            assigns.append(item)
-        elif isinstance(item, vast.InstanceList):
-            instances.extend(_handle_instance_list(item, path))
-        elif _strip.is_simulation_only(item):
-            initials.append(item)
-        else:
-            raise UnsupportedConstruct(type(item).__name__, path, getattr(item, "lineno", 0))
+        _dispatch_item(
+            item, path, params, localparams, port_directions, port_widths, signals, always_blocks, initials,
+            assigns, instances,
+        )
 
     ports: list[PortDecl] = []
     for port in module_def.portlist.ports:
-        if isinstance(port, vast.Ioport):
-            raise UnsupportedConstruct("Ioport", path, getattr(port, "lineno", 0))
-        if getattr(port, "dimensions", None) is not None:
-            raise UnsupportedConstruct("port dimension list", path, getattr(port, "lineno", 0))
-        name = port.name
-        direction = port_directions.get(name)
-        if direction is None:
-            raise UnsupportedConstruct(f"port {name!r} never declared a direction", path, getattr(port, "lineno", 0))
-        msb, lsb = port_widths.get(name, (None, None))
-        ports.append(PortDecl(name=name, direction=direction, msb_expr=msb, lsb_expr=lsb, is_scalar=msb is None))
+        ports.append(_dispatch_port(port, path, port_directions, port_widths))
 
     return ModuleIR(
         name=module_def.name,
@@ -146,6 +176,65 @@ def parse_module(path: Path) -> ModuleIR:
         initials=tuple(initials),
         instances=tuple(instances),
     )
+
+
+def survey_module(path: Path) -> list[UnsupportedConstruct]:
+    """Walk `path` collecting every out-of-subset construct instead of
+    raising on the first one.
+
+    Performs the same pyverilog parse `parse_module` performs, then calls
+    the same per-item dispatch (`_dispatch_item`) over the module's
+    top-level items and the same per-port dispatch (`_dispatch_port`) over
+    its port list, catching `UnsupportedConstruct` at each call and moving
+    on to the next item or port rather than propagating it. One refusing
+    item must not hide refusals in later items: that is the entire point of
+    a census. Refusals are returned in source order, exactly as
+    encountered, with no deduplication and no sorting.
+
+    A refusal raised below item granularity (inside `_render_expr`,
+    `_param_default_value`, and similar helpers `_dispatch_item` calls into)
+    is attributed to the enclosing top-level item's own line, which is
+    accurate enough for a census.
+
+    `parse_module`'s hard-fail contract is untouched by this function: this
+    is a second, additive entry point, not a collect-versus-raise flag
+    threaded through the first.
+    """
+    path = Path(path)
+    ast_root = _parse_ast(path)
+
+    module_defs = [item for item in ast_root.description.definitions if isinstance(item, vast.ModuleDef)]
+    if len(module_defs) != 1:
+        return [UnsupportedConstruct("source file with other than one module", path, 0)]
+    module_def = module_defs[0]
+
+    refusals: list[UnsupportedConstruct] = []
+    params: list[ParamDecl] = []
+    localparams: list[LocalparamDecl] = []
+    port_directions: dict[str, str] = {}
+    port_widths: dict[str, tuple[str | None, str | None]] = {}
+    signals: list[SignalDecl] = []
+    always_blocks: list = []
+    initials: list = []
+    assigns: list = []
+    instances: list = []
+
+    for item in module_def.items:
+        try:
+            _dispatch_item(
+                item, path, params, localparams, port_directions, port_widths, signals, always_blocks, initials,
+                assigns, instances,
+            )
+        except UnsupportedConstruct as exc:
+            refusals.append(exc)
+
+    for port in module_def.portlist.ports:
+        try:
+            _dispatch_port(port, path, port_directions, port_widths)
+        except UnsupportedConstruct as exc:
+            refusals.append(exc)
+
+    return refusals
 
 
 def _handle_instance_list(item, path) -> list[InstanceDecl]:
