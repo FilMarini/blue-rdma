@@ -17,6 +17,25 @@ width handling does not account for at all), and an `always` block whose
 sensitivity list is anything other than a single `posedge` on one signal
 (a mixed edge/level sensitivity list, which the emitter's synchronous
 single-clock process shape cannot represent).
+
+A top-level continuous `assign` (`vast.Assign`) is collected into
+`ModuleIR.assigns` for `emit.py` to render as a concurrent VHDL signal
+assignment. pyverilog surfaces a combined `wire ... = <expr>;` declaration
+as a *separate* `Assign` node interleaved inside the same `Decl.list` as
+the `Wire` node itself (the `Wire` node's own `.value` field stays `None`
+even for this form), so `_handle_decl` collects an `Assign` found there the
+same way the top-level item loop does. A `Wire` whose name is already a
+port (the non-ANSI `output wire Q_OUT_1;` net-type redeclaration idiom)
+adds no new signal at all: the port already carries its own identity
+verbatim, and the continuous assign that actually drives it targets the
+port name directly.
+
+A `Localparam` is a *subclass* of `Parameter` in pyverilog's own class
+hierarchy, so it must be checked before the `Parameter` branch or it is
+silently swallowed by it. A localparam's value is rendered once, here, to
+final VHDL text (generic names already substituted): unlike a width bound,
+a localparam's value is never re-interpreted per use site, so there is
+nothing for `width.py` to do with it downstream.
 """
 from __future__ import annotations
 
@@ -29,13 +48,22 @@ from pyverilog.vparser.parser import parse as _pyverilog_parse
 from . import strip as _strip
 from . import width as _width
 from .errors import UnsupportedConstruct
-from .ir import ModuleIR, ParamDecl, PortDecl, SignalDecl
+from .ir import LocalparamDecl, ModuleIR, ParamDecl, PortDecl, SignalDecl
 
 _BINOP_TEXT = {
     vast.Plus: "+",
     vast.Minus: "-",
     vast.Times: "*",
     vast.Divide: "/",
+}
+
+_COMPARISON_TEXT = {
+    vast.GreaterEq: ">=",
+    vast.LessEq: "<=",
+    vast.GreaterThan: ">",
+    vast.LessThan: "<",
+    vast.Eq: "=",
+    vast.NotEq: "/=",
 }
 
 
@@ -55,19 +83,23 @@ def parse_module(path: Path) -> ModuleIR:
     module_def = module_defs[0]
 
     params: list[ParamDecl] = []
+    localparams: list[LocalparamDecl] = []
     port_directions: dict[str, str] = {}
     port_widths: dict[str, tuple[str | None, str | None]] = {}
     signals: list[SignalDecl] = []
     always_blocks: list = []
     initials: list = []
+    assigns: list = []
 
     for item in module_def.items:
         if isinstance(item, vast.Decl):
             for decl in item.list:
-                _handle_decl(decl, path, params, port_directions, port_widths, signals)
+                _handle_decl(decl, path, params, localparams, port_directions, port_widths, signals, assigns)
         elif isinstance(item, vast.Always):
             _check_always_sensitivity(item, path)
             always_blocks.append(item)
+        elif isinstance(item, vast.Assign):
+            assigns.append(item)
         elif _strip.is_simulation_only(item):
             initials.append(item)
         else:
@@ -92,18 +124,21 @@ def parse_module(path: Path) -> ModuleIR:
         params=tuple(params),
         ports=tuple(ports),
         signals=tuple(signals),
+        localparams=tuple(localparams),
+        assigns=tuple(assigns),
         always_blocks=tuple(always_blocks),
         initials=tuple(initials),
     )
 
 
-def _handle_decl(decl, path, params, port_directions, port_widths, signals) -> None:
-    if isinstance(decl, vast.Parameter):
+def _handle_decl(decl, path, params, localparams, port_directions, port_widths, signals, assigns) -> None:
+    if isinstance(decl, vast.Localparam):
+        value_expr = _render_localparam_value(decl.value.var, path)
+        localparams.append(LocalparamDecl(name=decl.name, value_expr=value_expr))
+    elif isinstance(decl, vast.Parameter):
         default_value = _param_default_value(decl, path)
         default_expr = _param_default_text(decl.value.var)
         params.append(ParamDecl(name=decl.name, default_expr=default_expr, default_value=default_value))
-    elif isinstance(decl, vast.Localparam):
-        raise UnsupportedConstruct("Localparam", path, getattr(decl, "lineno", 0))
     elif isinstance(decl, vast.Inout):
         raise UnsupportedConstruct("inout port", path, getattr(decl, "lineno", 0))
     elif isinstance(decl, vast.Output):
@@ -118,18 +153,101 @@ def _handle_decl(decl, path, params, port_directions, port_widths, signals) -> N
         port_widths[decl.name] = _width_bounds(decl.width, path)
     elif isinstance(decl, vast.Reg):
         msb, lsb = _width_bounds(decl.width, path)
-        signals.append(
-            SignalDecl(
-                name=decl.name,
-                msb_expr=msb,
-                lsb_expr=lsb,
-                is_scalar=decl.width is None,
-                is_memory=False,
-                depth_expr=None,
+        dimensions = getattr(decl, "dimensions", None)
+        if dimensions is not None:
+            depth_low, depth_high = _memory_bounds(dimensions, path)
+            signals.append(
+                SignalDecl(
+                    name=decl.name,
+                    msb_expr=msb,
+                    lsb_expr=lsb,
+                    is_scalar=decl.width is None,
+                    is_memory=True,
+                    depth_low_expr=depth_low,
+                    depth_high_expr=depth_high,
+                )
             )
+        else:
+            signals.append(
+                SignalDecl(name=decl.name, msb_expr=msb, lsb_expr=lsb, is_scalar=decl.width is None, is_memory=False)
+            )
+    elif isinstance(decl, vast.Wire):
+        # The non-ANSI `output wire Q_OUT_1;` idiom redeclares an
+        # already-declared port's net type; it introduces no new signal at
+        # all, since the port itself already carries the identity that a
+        # continuous assign to it will target verbatim (D-14).
+        if decl.name in port_directions:
+            return
+        if getattr(decl, "dimensions", None) is not None:
+            raise UnsupportedConstruct("memory-shaped wire declaration", path, getattr(decl, "lineno", 0))
+        msb, lsb = _width_bounds(decl.width, path)
+        signals.append(
+            SignalDecl(name=decl.name, msb_expr=msb, lsb_expr=lsb, is_scalar=decl.width is None, is_memory=False)
         )
+    elif isinstance(decl, vast.Assign):
+        # pyverilog's own representation of `wire ... = <expr>;`: a bare
+        # `Assign` node sitting in the same `Decl.list` as the `Wire`
+        # declaration it initializes, never in the `Wire` node's own
+        # `.value` field.
+        assigns.append(decl)
+    elif isinstance(decl, vast.Integer):
+        # A simulation-only loop or scratch variable (`integer i;`) declared
+        # at module scope for use inside an `initial` block. `strip.py`
+        # already drops the block that declares and uses it; the
+        # declaration itself carries no synthesizable meaning.
+        return
     else:
         raise UnsupportedConstruct(type(decl).__name__, path, getattr(decl, "lineno", 0))
+
+
+def _memory_bounds(dimensions, path) -> tuple[str, str]:
+    if len(dimensions.lengths) != 1:
+        raise UnsupportedConstruct(
+            "multi-dimensional memory array", path, getattr(dimensions, "lineno", 0)
+        )
+    length = dimensions.lengths[0]
+    return _render_expr(length.msb, path), _render_expr(length.lsb, path)
+
+
+def _render_localparam_value(node, path) -> str:
+    """Render a localparam's value expression as final VHDL text.
+
+    Unlike a width bound (`_render_expr`, below), the result here has
+    already had every parameter name mapped to its generic name
+    (`f"{name.upper()}_G"`, the same rule `emit.py`/`width.py` apply
+    independently), because a localparam's own VHDL constant declaration is
+    self-contained: nothing downstream re-derives it per use site.
+    """
+    if isinstance(node, vast.Cond):
+        cond_text = _render_localparam_condition(node.cond, path)
+        true_text = _render_localparam_value(node.true_value, path)
+        false_text = _render_localparam_value(node.false_value, path)
+        return f"ite({cond_text}, {true_text}, {false_text})"
+    return _render_localparam_operand(node, path)
+
+
+def _render_localparam_operand(node, path) -> str:
+    if isinstance(node, vast.IntConst):
+        return str(_width.parse_int_literal(node.value))
+    if isinstance(node, vast.Identifier):
+        return f"{node.name.upper()}_G"
+    if isinstance(node, vast.Uminus):
+        return f"-{_render_localparam_operand(node.right, path)}"
+    if isinstance(node, vast.Uplus):
+        return _render_localparam_operand(node.right, path)
+    for cls, op in _BINOP_TEXT.items():
+        if isinstance(node, cls):
+            return f"{_render_localparam_operand(node.left, path)} {op} {_render_localparam_operand(node.right, path)}"
+    raise UnsupportedConstruct(type(node).__name__ + " localparam value", path, getattr(node, "lineno", 0))
+
+
+def _render_localparam_condition(node, path) -> str:
+    for cls, op in _COMPARISON_TEXT.items():
+        if isinstance(node, cls):
+            left = _render_localparam_operand(node.left, path)
+            right = _render_localparam_operand(node.right, path)
+            return f"{left} {op} {right}"
+    raise UnsupportedConstruct(type(node).__name__ + " localparam condition", path, getattr(node, "lineno", 0))
 
 
 def _check_always_sensitivity(always_node, path) -> None:
