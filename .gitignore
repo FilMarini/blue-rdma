@@ -1,1 +1,3 @@
 ruckus.tcl
+__pycache__/
+*.pyc
