@@ -271,10 +271,14 @@ def infer_width(node, ctx) -> WidthExpr:
 
     Self-determined: a literal takes its declared or default size, an
     identifier takes the width `ctx` already knows for it, a part-select
-    takes msb minus lsb plus one, a bit-select is 1, a concatenation is the
-    sum of its operands' self-widths, a replication is its count times its
-    repeated operand's self-width (kept symbolic when the count is a
-    generic), and a comparison or logical operator is 1.
+    takes msb minus lsb plus one, a bit-select is 1 unless its base is a
+    memory array (`ctx.is_memory`), in which case it is that memory's own
+    element width -- `RAM[ADDRA]`/`arr[head]` select a whole element, not
+    one bit, and the emitter's index-to-`to_integer(unsigned(...))`
+    conversion is where that distinction actually matters. A concatenation
+    is the sum of its operands' self-widths, a replication is its count
+    times its repeated operand's self-width (kept symbolic when the count
+    is a generic), and a comparison or logical operator is 1.
 
     Context-determined: an arithmetic or bitwise binary operator, or
     bitwise NOT, takes the maximum of its operand self-widths; the
@@ -299,7 +303,7 @@ def infer_width(node, ctx) -> WidthExpr:
         lsb_text = _node_to_text(node.lsb, ctx)
         return _width_of_range(msb_text, lsb_text, ctx, node)
     if isinstance(node, vast.Pointer):
-        return WidthExpr(1, "1")
+        return _pointer_width(node, ctx)
     if isinstance(node, vast.Concat):
         widths = [infer_width(item, ctx) for item in node.list]
         if all(w.value is not None for w in widths):
@@ -323,6 +327,29 @@ def infer_width(node, ctx) -> WidthExpr:
     if isinstance(node, vast.SystemCall):
         raise UnsupportedConstruct(f"${node.syscall} system function", ctx.path, getattr(node, "lineno", 0))
     raise UnsupportedConstruct(type(node).__name__, ctx.path, getattr(node, "lineno", 0))
+
+
+def _pointer_width(node: vast.Pointer, ctx) -> WidthExpr:
+    """A bit-select's width, except when the base is a memory array.
+
+    `ctx.is_memory` is looked up defensively via `getattr` rather than
+    called unconditionally: the hand-built stand-in contexts several unit
+    tests in this package construct expose only the attributes `infer_width`
+    otherwise reads (`path`, `signal_size`, `generic_name`, `param_kind`,
+    `param_names`, `is_param`), and none of those tests exercise a memory
+    base, so a context with no `is_memory` at all is exactly equivalent to
+    one that reports every name as not-a-memory.
+    """
+    base_name = node.var.name if isinstance(node.var, vast.Identifier) else None
+    is_memory = getattr(ctx, "is_memory", None)
+    if base_name is not None and is_memory is not None and is_memory(base_name):
+        size_text = ctx.signal_size.get(base_name)
+        if size_text is not None:
+            if size_text.isdigit():
+                value = int(size_text)
+                return WidthExpr(value, size_text)
+            return WidthExpr(None, size_text)
+    return WidthExpr(1, "1")
 
 
 def _wider_of(left: WidthExpr, right: WidthExpr) -> WidthExpr:

@@ -105,6 +105,17 @@ def _render_int_const(node: vast.IntConst, ctx, target_width: str | None) -> str
     text = node.value
     value = _width.parse_int_literal(text)
     self_width = _width.infer_width(node, ctx)
+    if self_width.value == 1 and target_width not in (None, "1"):
+        # A 1-bit literal (`1'b1`, the `+ 1` in `tail + 1'b1`, ...) widened
+        # by a vector context has no `_fit`-through-`resize` path: `resize`
+        # is defined only for `unsigned`/`signed`, and a scalar `'1'`
+        # character literal is not array-typed at all, so wrapping it in
+        # `resize(...)` is a type error regardless of context. `toSlv` is
+        # the same elaboration-time value-to-vector conversion this
+        # codebase already uses for a "natural"-kind parameter in a vector
+        # context; a literal widened by arithmetic context is the same
+        # shape of problem.
+        return f"toSlv({value}, {target_width})"
     if self_width.value == 1:
         core = f"'{value}'"
     else:
@@ -283,6 +294,21 @@ def _render_partselect(node: vast.Partselect, ctx, target_width: str | None) -> 
 
 def _render_pointer(node: vast.Pointer, ctx, target_width: str | None) -> str:
     base = _base_text(node.var, ctx)
+    base_name = node.var.name if isinstance(node.var, vast.Identifier) else None
+    is_memory = getattr(ctx, "is_memory", None)
+    if base_name is not None and is_memory is not None and is_memory(base_name):
+        # A memory-array element access: the index selects a whole element,
+        # not a bit, and VHDL array indexing requires an integer, never an
+        # `slv` directly, so the index is converted through
+        # `to_integer(unsigned(...))`. `RAM[ADDRA]`/`arr[head]` are the only
+        # shapes this branch exists for; a plain vector's bit-select (the
+        # `is_memory` is False path below) never occurs with a non-constant
+        # index anywhere in the corpus, so that path is left exactly as it
+        # was before memory support existed.
+        index_text = render_expression(node.ptr, ctx, target_width=None)
+        core = f"{base}(to_integer(unsigned({index_text})))"
+        self_width = _width.infer_width(node, ctx)
+        return _fit(core, self_width, target_width, node, ctx)
     index_text = render_expression(node.ptr, ctx, target_width=None)
     core = f"{base}({index_text})"
     self_width = _width.WidthExpr(1, "1")

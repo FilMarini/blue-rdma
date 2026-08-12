@@ -17,23 +17,38 @@ its use site with `toSlv(<GENERIC>, <width>)` wherever a vector context
 needs it. Never emits a `TPD_G` generic or any delay clause on any
 assignment: these entities are compared cycle by cycle against their
 Verilog originals, and any output delay breaks bit-exactness by
-construction.
+construction. A parameter named `guarded` (case-insensitively) is never
+emitted as a generic at all: the corpus's own `guarded` parameter is read
+only inside the `$display`-guarded error-reporting block this emitter
+already drops, so a `GUARDED_G` generic would be entirely unreferenced
+dead surface, and the hand-written Phase 2 blue-lib entities already
+established the precedent of dropping it rather than carrying it through.
+A module with no remaining generics after that drop gets no `generic`
+clause at all, since VHDL has no syntax for an empty one.
 """
 from __future__ import annotations
 
+import ast as _ast
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import pyverilog.vparser.ast as vast
+
+from . import expr as _expr
 from . import initializers as _initializers
 from . import instantiate as _instantiate
+from . import strip as _strip
 from . import stmt as _stmt
 from . import width as _width
+from .errors import UnsupportedConstruct
 from .mangle import NameMap
 
 __all__ = ["emit_vhdl"]
 
 INDENT = "   "
+
+_DROPPED_GENERIC_NAMES = frozenset({"guarded"})
 
 _SLAC_HEADER = (
     "-------------------------------------------------------------------------------\n"
@@ -64,12 +79,20 @@ class _EmitContext:
     generic_name: dict
     param_kind: dict
     param_names: set
+    localparam_name: dict = field(default_factory=dict)
+    memory_names: set = field(default_factory=set)
     signal_size: dict = field(default_factory=dict)
 
     def is_param(self, name: str) -> bool:
         return name in self.param_names
 
+    def is_memory(self, name: str) -> bool:
+        return name in self.memory_names
+
     def name_for(self, name: str) -> str:
+        localparam = self.localparam_name.get(name.lower())
+        if localparam is not None:
+            return localparam
         try:
             return self.name_map.signal(name)
         except KeyError:
@@ -81,8 +104,14 @@ class _EmitContext:
 
 def emit_vhdl(module_ir, tool_version: str = "0.1.0") -> str:
     name_map = NameMap.build(module_ir)
-    generic_name = {param.name: f"{param.name.upper()}_G" for param in module_ir.params}
+    generic_name = {
+        param.name: f"{param.name.upper()}_G"
+        for param in module_ir.params
+        if param.name.lower() not in _DROPPED_GENERIC_NAMES
+    }
     param_kind = {param.name: _param_kind(param.name, module_ir) for param in module_ir.params}
+    localparam_name = {localparam.name.lower(): f"{localparam.name.upper()}_C" for localparam in module_ir.localparams}
+    memory_names = {signal.name for signal in module_ir.signals if signal.is_memory}
 
     ctx = _EmitContext(
         path=module_ir.source_path,
@@ -90,13 +119,24 @@ def emit_vhdl(module_ir, tool_version: str = "0.1.0") -> str:
         generic_name=generic_name,
         param_kind=param_kind,
         param_names={param.name for param in module_ir.params},
+        localparam_name=localparam_name,
+        memory_names=memory_names,
     )
+    # Every port and signal gets an entry, scalar ones included: a scalar
+    # assignment target's own width is "1", the same convention
+    # `_identifier_width` already falls back to when a name carries no
+    # entry at all, but an *assigned* target needs that "1" to actually
+    # reach `render_expression` as an explicit `target_width` so a
+    # comparison or logical result renders through the `toSl(...)` wrap
+    # instead of as a bare boolean assigned straight to a `sl` signal
+    # (`SizedFIFO.v`'s `ring_empty <= (next_head == tail);` is the corpus
+    # case this closes).
     for port in module_ir.ports:
-        if not port.is_scalar:
-            ctx.signal_size[port.name] = _width.symbolic_size(port.msb_expr, port.lsb_expr)
+        ctx.signal_size[port.name] = "1" if port.is_scalar else _width.symbolic_size(port.msb_expr, port.lsb_expr)
     for signal in module_ir.signals:
-        if not signal.is_scalar:
-            ctx.signal_size[signal.name] = _width.symbolic_size(signal.msb_expr, signal.lsb_expr)
+        ctx.signal_size[signal.name] = (
+            "1" if signal.is_scalar else _width.symbolic_size(signal.msb_expr, signal.lsb_expr)
+        )
 
     entity_lines = _render_entity(module_ir, param_kind, generic_name)
     declarative_lines, used_helpers = _render_declarations(module_ir, ctx)
@@ -145,6 +185,10 @@ def _param_kind(param_name: str, module_ir) -> str:
             width_texts.append(signal.msb_expr)
         if signal.lsb_expr:
             width_texts.append(signal.lsb_expr)
+        if signal.depth_low_expr:
+            width_texts.append(signal.depth_low_expr)
+        if signal.depth_high_expr:
+            width_texts.append(signal.depth_high_expr)
     pattern = re.compile(rf"\b{re.escape(param_name)}\b")
     return "positive" if any(pattern.search(text) for text in width_texts) else "natural"
 
@@ -167,7 +211,10 @@ def _render_generic_clause(module_ir, param_kind, generic_name) -> list[str]:
     entries = [
         (generic_name[param.name], param_kind[param.name], str(param.default_value))
         for param in module_ir.params
+        if param.name in generic_name
     ]
+    if not entries:
+        return []
     max_name = max(len(name) for name, _, _ in entries)
     max_type = max(len(kind) for _, kind, _ in entries)
     lines = [f"{INDENT}generic ("]
@@ -199,42 +246,162 @@ def _render_port_clause(module_ir) -> list[str]:
 
 def _render_declarations(module_ir, ctx) -> tuple[list[str], set[str]]:
     used_helpers: set[str] = set()
-    signal_lines: list[str] = []
-    for signal in module_ir.signals:
-        vhdl_name = ctx.name_map.signal(signal.name)
-        type_text = _vector_type(signal.msb_expr, signal.lsb_expr, signal.is_scalar)
-        default = _initializers.initializer_for(signal, module_ir.initials, ctx)
-        if default is not None and "bsvAltInit(" in default:
-            used_helpers.add("bsvAltInit")
-        suffix = f" := {default}" if default is not None else ""
-        signal_lines.append(f"{INDENT}signal {vhdl_name} : {type_text}{suffix};")
+    lines: list[str] = []
+
+    if module_ir.localparams:
+        for localparam in module_ir.localparams:
+            const_name = ctx.localparam_name[localparam.name.lower()]
+            lines.append(f"{INDENT}constant {const_name} : natural := {localparam.value_expr};")
+        lines.append("")
+
+    # Scalars first, then memories: the only cross-signal dependency this
+    # corpus has is a memory element's default referencing an already
+    # (scalar) signal (`SizedFIFO.v`'s `arr` seeding every element from
+    # `D_OUT`), never the reverse. VHDL requires a signal to be declared
+    # before its name is visible to a later declaration in the same
+    # declarative region, so the dependency's direction fixes the order.
+    scalar_signals = [signal for signal in module_ir.signals if not signal.is_memory]
+    memory_signals = [signal for signal in module_ir.signals if signal.is_memory]
+
+    declaration_lines: list[str] = []
+    for signal in scalar_signals:
+        declaration_lines.extend(_render_scalar_declaration(signal, module_ir, ctx, used_helpers))
+    for signal in memory_signals:
+        declaration_lines.extend(_render_memory_declaration(signal, module_ir, ctx, used_helpers))
 
     helper_lines = _initializers.helper_functions(used_helpers)
-    lines: list[str] = []
     if helper_lines:
         lines.extend(helper_lines)
         lines.append("")
-    lines.extend(signal_lines)
+    lines.extend(declaration_lines)
     return lines, used_helpers
 
 
-def _render_body(module_ir, ctx, used_helpers) -> list[str]:
-    lines: list[str] = []
-    lines.extend(_instantiate.component_declarations(module_ir, ctx))
-    for always_block in module_ir.always_blocks:
-        lines.extend(_render_process(always_block, ctx))
+def _render_scalar_declaration(signal, module_ir, ctx, used_helpers: set[str]) -> list[str]:
+    vhdl_name = ctx.name_map.signal(signal.name)
+    type_text = _vector_type(signal.msb_expr, signal.lsb_expr, signal.is_scalar)
+    default = _initializers.initializer_for(signal, module_ir.initials, ctx)
+    if default is not None and "bsvAltInit(" in default:
+        used_helpers.add("bsvAltInit")
+    suffix = f" := {default}" if default is not None else ""
+    return [f"{INDENT}signal {vhdl_name} : {type_text}{suffix};"]
 
-    signal_by_original = {signal.name: signal for signal in module_ir.signals}
+
+def _render_memory_declaration(signal, module_ir, ctx, used_helpers: set[str]) -> list[str]:
+    vhdl_name = ctx.name_map.signal(signal.name)
+    element_type = _vector_type(signal.msb_expr, signal.lsb_expr, signal.is_scalar)
+    # VSG's type-naming rule (`type_004`) requires PascalCase, so the type
+    # name capitalizes the signal's own first letter even though the
+    # signal itself stays camelCase (`ram` -> `RamType`, `arr` -> `ArrType`).
+    type_name = f"{vhdl_name[0].upper()}{vhdl_name[1:]}Type"
+    low = _render_declared_bound(signal.depth_low_expr, ctx)
+    high = _render_declared_bound(signal.depth_high_expr, ctx)
+    default = _initializers.memory_initializer_for(signal, module_ir.initials, ctx)
+    if default is not None and "bsvAltInit(" in default:
+        used_helpers.add("bsvAltInit")
+    lines = [f"{INDENT}type {type_name} is array ({low} to {high}) of {element_type};"]
+    suffix = f" := (others => {default})" if default is not None else ""
+    lines.append(f"{INDENT}signal {vhdl_name} : {type_name}{suffix};")
+    return lines
+
+
+def _render_declared_bound(text: str, ctx) -> str:
+    """Render a memory array's own declared depth bound (`0`, `MEMSIZE-1`,
+    `p2depth2`, ...) as VHDL text.
+
+    A small, self-contained mirror of `width.py`'s whitelisted-`ast`
+    grammar (integer constants, unary +/-, and the four arithmetic binary
+    operators), scoped to this one need: unlike a signal's own vector
+    width, a memory's depth bound can name a *localparam* as well as a
+    generic, and `width.py`'s own symbolic renderer has no localparam
+    concept to consult. Kept local here rather than teaching `width.py`
+    about localparams, since memory declarations are this module's own
+    concern.
+    """
+    tree = _ast.parse(text.strip(), mode="eval")
+    return _render_declared_bound_node(tree.body, ctx)
+
+
+def _render_declared_bound_node(node, ctx) -> str:
+    if isinstance(node, _ast.Constant) and isinstance(node.value, int):
+        return str(node.value)
+    if isinstance(node, _ast.Name):
+        generic = ctx.generic_name.get(node.id)
+        if generic is not None:
+            return generic
+        localparam = ctx.localparam_name.get(node.id.lower())
+        if localparam is not None:
+            return localparam
+        raise UnsupportedConstruct(f"unresolved identifier {node.id!r} in array bound", ctx.path, 0)
+    if isinstance(node, _ast.UnaryOp) and isinstance(node.op, (_ast.UAdd, _ast.USub)):
+        value = _render_declared_bound_node(node.operand, ctx)
+        return value if isinstance(node.op, _ast.UAdd) else f"-{value}"
+    if isinstance(node, _ast.BinOp) and isinstance(node.op, (_ast.Add, _ast.Sub, _ast.Mult, _ast.FloorDiv, _ast.Div)):
+        left = _render_declared_bound_node(node.left, ctx)
+        right = _render_declared_bound_node(node.right, ctx)
+        op = {_ast.Add: "+", _ast.Sub: "-", _ast.Mult: "*", _ast.FloorDiv: "/", _ast.Div: "/"}[type(node.op)]
+        return f"{left}{op}{right}"
+    raise UnsupportedConstruct("array bound expression", ctx.path, 0)
+
+
+def _render_body(module_ir, ctx, used_helpers) -> list[str]:
+    groups: list[list[str]] = []
+
+    component_lines = _instantiate.component_declarations(module_ir, ctx)
+    if component_lines:
+        groups.append(component_lines)
+
+    assign_lines = [_render_assign(assign, ctx) for assign in module_ir.assigns]
+    if assign_lines:
+        groups.append(assign_lines)
+
+    kept_always_blocks, _dropped = _strip.partition_always_blocks(module_ir)
+    process_lines: list[str] = []
+    for index, always_block in enumerate(kept_always_blocks):
+        if index > 0:
+            process_lines.append("")
+        process_lines.extend(_render_process(always_block, ctx))
+    if process_lines:
+        groups.append(process_lines)
+
+    signal_by_original = {signal.name: signal for signal in module_ir.signals if not signal.is_memory}
     driving_lines = [
         f"{INDENT}{port.name} <= {ctx.name_for(port.name)};"
         for port in module_ir.ports
         if port.direction == "out" and port.name in signal_by_original
     ]
-    if driving_lines and lines:
-        lines.append("")
-    lines.extend(driving_lines)
+    if driving_lines:
+        groups.append(driving_lines)
 
+    lines: list[str] = []
+    for index, group in enumerate(groups):
+        if index > 0:
+            lines.append("")
+        lines.extend(group)
     return lines
+
+
+def _render_assign(assign: vast.Assign, ctx) -> str:
+    target_name = assign.left.var.name
+    target = ctx.name_for(target_name)
+    target_width = ctx.target_width_for(target_name)
+    value = _render_assign_value(assign.right.var, target_width, ctx)
+    return f"{INDENT}{target} <= {value};"
+
+
+def _render_assign_value(rhs, target_width, ctx) -> str:
+    # `SizedFIFO.v`'s `depthLess2 = p2depth2[p3cntr_width-1:0]` reinterprets
+    # a natural-valued localparam's bits as a vector -- a Verilog idiom
+    # with no VHDL equivalent through ordinary slicing, since a `natural`
+    # cannot be indexed with `(msb downto lsb)`. `toSlv` is the same
+    # elaboration-time conversion `_render_identifier` already applies to a
+    # "natural"-kind parameter in a vector context; this is the one other
+    # place in the corpus that same conversion is needed.
+    if isinstance(rhs, vast.Partselect) and isinstance(rhs.var, vast.Identifier):
+        localparam_name = ctx.localparam_name.get(rhs.var.name.lower())
+        if localparam_name is not None:
+            return f"toSlv({localparam_name}, {target_width})"
+    return _expr.render_expression(rhs, ctx, target_width=target_width)
 
 
 def _render_process(always_node, ctx) -> list[str]:

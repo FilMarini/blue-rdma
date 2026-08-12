@@ -1,8 +1,9 @@
 # Test methodology:
-# - Sweep: every vendored `.v` file that transpiles successfully today (a
-#   file still refused by a construct a same-wave plan has not yet landed
-#   a pass for is excluded from these checks rather than failed, matching
-#   `test_byte_identical.py`'s posture at this point in the wave).
+# - Sweep: every vendored `.v` file. The parser now handles every
+#   construct all thirteen vendored files use, so
+#   `_emitted_texts`'s per-file `UnsupportedConstruct` catch below is a
+#   defensive fallback rather than an active accommodation; every file
+#   contributes its emitted text to these checks.
 # - Stimulus: the real vendored corpus, transpiled once per file.
 # - Checks: every violation across the whole corpus is collected before a
 #   single assertion fires, so one run names every offending file and
@@ -38,6 +39,10 @@ def _emitted_texts(vendor_dir: Path) -> dict[str, str]:
         except UnsupportedConstruct:
             continue
     return texts
+
+
+def test_emitted_texts_cover_the_whole_corpus(vendor_dir: Path) -> None:
+    assert len(_emitted_texts(vendor_dir)) == 13
 
 
 def test_emitted_files_are_ascii_clean(vendor_dir: Path) -> None:

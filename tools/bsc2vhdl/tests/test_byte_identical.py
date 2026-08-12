@@ -1,9 +1,11 @@
 # Test methodology:
-# - Sweep: every vendored `.v` file that transpiles successfully today
-#   (a file still refused by a construct a same-wave plan has not yet
-#   landed a pass for is skipped with a recorded reason rather than
-#   failed; the phase gate plan re-runs this same test over the complete
-#   set with no skips allowed).
+# - Sweep: every vendored `.v` file. The parser now handles every
+#   construct all thirteen vendored files use (`Wire`/top-level `assign`
+#   declarations and the one `Cond`-shaped `localparam` default that a
+#   same-wave plan had not yet landed a pass for), so the skip mechanism
+#   below is a defensive fallback rather than an active accommodation:
+#   `test_byte_identical_across_corpus` asserts the skip list is empty,
+#   closing the corpus-wide gap this file's own comment used to describe.
 # - Stimulus: the real vendored corpus, transpiled twice per file into two
 #   independent `tmp_path` subdirectories through the real command-line
 #   entry point; a synthetic wall-clock timestamp line for the mutation
@@ -87,13 +89,10 @@ def test_byte_identical_across_corpus(vendor_dir: Path, tmp_path: Path) -> None:
             mismatches.append(f"{vendor_file.name}: {module_name}.namemap.json differs between the two emissions")
 
     assert mismatches == [], "\n".join(mismatches)
-    # `skipped` is deliberately not asserted empty here: at this point in
-    # the wave, several files still refuse on a construct a sibling
-    # same-wave plan has not yet landed a pass for (see this plan's
-    # SUMMARY for the current list and why). The phase gate plan re-runs
-    # this exact test over the complete corpus and requires the list to be
-    # empty by then.
-    print("test_byte_identical_across_corpus skipped:", skipped)
+    # Every one of the thirteen vendored files transpiles successfully as
+    # of this plan; an empty skip list is the corpus-wide gap this test
+    # once tolerated, now closed.
+    assert skipped == [], "\n".join(skipped)
 
 
 def test_byte_identical_no_timestamp(vendor_dir: Path) -> None:
