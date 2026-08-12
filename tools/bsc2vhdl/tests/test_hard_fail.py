@@ -1,8 +1,12 @@
 # Test methodology:
 # - Sweep: the refusal contract at the real command-line boundary
 #   (`python -m tools.bsc2vhdl`), proven against four synthetic
-#   out-of-subset inputs (`generate`, `inout`, `task`, a shift operator)
-#   plus a mixed good/bad batch.
+#   out-of-subset inputs (`generate`, `inout`, `task`, an arithmetic shift
+#   operator) plus a mixed good/bad batch. The logical shift operators
+#   (`<<`, `>>`) are no longer in this set: `mkQP.v`/`mkTransportLayer.v`
+#   both use them, and `width.py`/`expr.py` render them via
+#   `ieee.numeric_std.shift_left`/`shift_right`. The arithmetic forms
+#   (`<<<`, `>>>`) occur nowhere in the corpus and stay refused.
 # - Stimulus: four minimal Verilog modules written to `tmp_path` as text,
 #   never added to `tests/vendor/`, which is pinned to the thirteen real
 #   surf files and must stay exactly that count. The `generate` case has
@@ -53,15 +57,15 @@ module TaskProbe(CLK);
 endmodule
 """
 
-_SHIFT_SOURCE = """\
-module ShiftProbe(CLK, A, B);
+_ARITH_SHIFT_SOURCE = """\
+module ArithShiftProbe(CLK, A, B);
    parameter width = 8;
    input CLK;
    input [width - 1 : 0] A;
    output [width - 1 : 0] B;
    reg [width - 1 : 0] B;
    always @(posedge CLK)
-     B <= A << 1;
+     B <= A <<< 1;
 endmodule
 """
 
@@ -116,9 +120,9 @@ def test_hard_fail_task_writes_no_output(tmp_path: Path) -> None:
     assert list(out_dir.iterdir()) == []
 
 
-def test_hard_fail_shift_writes_no_output(tmp_path: Path) -> None:
-    input_path = tmp_path / "ShiftProbe.v"
-    input_path.write_text(_SHIFT_SOURCE)
+def test_hard_fail_arith_shift_writes_no_output(tmp_path: Path) -> None:
+    input_path = tmp_path / "ArithShiftProbe.v"
+    input_path.write_text(_ARITH_SHIFT_SOURCE)
     out_dir = tmp_path / "out"
     out_dir.mkdir()
 

@@ -70,6 +70,15 @@ _CONTEXT_DETERMINED_BINARY_TYPES = (vast.Plus, vast.Minus, vast.Times, vast.And,
 # operand's width, propagated the same way as the binary group above.
 _CONTEXT_DETERMINED_UNARY_TYPES = (vast.Unot,)
 
+# Shift operators are context-determined from the *left* operand alone: the
+# IEEE LRM makes the shift amount (the right operand) self-determined, so it
+# never widens the result the way the arithmetic/bitwise group above does by
+# taking the max of both operands. `mkQP.v`/`mkTransportLayer.v` both shift a
+# fixed-width literal by a narrower, independently-sized run-length signal
+# (`32'd1 << lastFragValidByteNumWithPadding__h13766`), and the result must
+# stay 32 bits regardless of the shift amount's own width.
+_SHIFT_TYPES = (vast.Sll, vast.Srl)
+
 
 @dataclass(frozen=True)
 class WidthExpr:
@@ -286,12 +295,17 @@ def infer_width(node, ctx) -> WidthExpr:
     `expr.py`'s renderer, which is handed that context width directly and
     is the one place resize/slice decisions are actually made. A ternary's
     width is the maximum of its two arms' self-widths for the same reason.
+    A shift (`<<`/`>>`) is context-determined from its *left* operand
+    alone, per the IEEE LRM: the shift amount (the right operand) is
+    self-determined and never widens the result, unlike the
+    arithmetic/bitwise group above.
 
-    Refused by name, with file and line: a shift, a signed or unsigned
-    system function, a reduction operator, a division, or a modulo. None of
-    these fourteen files contains one; an upstream Bluespec change that
-    starts emitting one announces itself here instead of silently
-    producing wrong bits.
+    Refused by name, with file and line: a signed or unsigned system
+    function, a reduction operator, a division, or a modulo, plus an
+    arithmetic (`<<<`/`>>>`) shift, none of which occurs anywhere in the
+    corpus (`mkQP.v`/`mkTransportLayer.v` use only the logical `<<`/`>>`
+    forms). An upstream Bluespec change that starts emitting one of these
+    announces itself here instead of silently producing wrong bits.
     """
     if isinstance(node, vast.IntConst):
         width = _literal_width(node.value)
@@ -324,6 +338,8 @@ def infer_width(node, ctx) -> WidthExpr:
         return _wider_of(left_width, right_width)
     if isinstance(node, _CONTEXT_DETERMINED_UNARY_TYPES):
         return infer_width(node.right, ctx)
+    if isinstance(node, _SHIFT_TYPES):
+        return infer_width(node.left, ctx)
     if isinstance(node, vast.SystemCall):
         raise UnsupportedConstruct(f"${node.syscall} system function", ctx.path, getattr(node, "lineno", 0))
     raise UnsupportedConstruct(type(node).__name__, ctx.path, getattr(node, "lineno", 0))
@@ -361,7 +377,11 @@ def _wider_of(left: WidthExpr, right: WidthExpr) -> WidthExpr:
     # Genuinely different symbolic widths with no elaboration-time value to
     # compare: keep both operands' text visible rather than silently
     # picking one, since either could turn out wider once generics bind.
-    return WidthExpr(None, f"max({left.text}, {right.text})")
+    # `maximum` is `StdRtlPkg`'s own two-argument integer function (surf's
+    # utility package, already `use`d by every emitted entity); there is no
+    # bare `max` function in scope, and no fixture before `mkQP.v` ever
+    # exercised this symbolic-mismatch branch to notice.
+    return WidthExpr(None, f"maximum({left.text}, {right.text})")
 
 
 def _repeat_width(node: vast.Repeat, ctx) -> WidthExpr:

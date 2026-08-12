@@ -3,7 +3,9 @@
 #   `infer_width` implements: sized and unsized literals, identifiers
 #   resolved against a hand-built context, part-selects, concatenation,
 #   replication with a symbolic count, comparisons and logical operators,
-#   and the two refusal shapes (a zero-length range, a shift).
+#   a logical shift (`Sll`/`Srl`, context-determined from the left operand
+#   alone), and the two refusal shapes (a zero-length range, an arithmetic
+#   shift).
 # - Stimulus: Hand-built pyverilog AST nodes constructed directly rather
 #   than parsed from a `.v` file, plus a minimal stand-in context exposing
 #   exactly the attributes `width.py` reads (`path`, `signal_size`,
@@ -124,14 +126,26 @@ def test_infer_width_negative_length_range_is_refused() -> None:
         infer_width(node, _Ctx())
 
 
-def test_infer_width_refuses_a_shift_naming_the_line() -> None:
-    node = vast.Sll(vast.Identifier("a"), vast.IntConst("1"), lineno=99)
-    with pytest.raises(UnsupportedConstruct, match="Sll"):
+def test_infer_width_refuses_an_arithmetic_shift_naming_the_line() -> None:
+    node = vast.Sra(vast.Identifier("a"), vast.IntConst("1"), lineno=99)
+    with pytest.raises(UnsupportedConstruct, match="Sra"):
         infer_width(node, _Ctx())
     try:
         infer_width(node, _Ctx())
     except UnsupportedConstruct as exc:
         assert "99" in str(exc)
+
+
+def test_infer_width_logical_shift_takes_left_operand_width_only() -> None:
+    # `32'd1 << lastFragValidByteNumWithPadding__h13766` (`mkQP.v`): the
+    # result stays 32 bits regardless of how wide the shift amount is,
+    # per the IEEE LRM rule that a shift's right operand is
+    # self-determined and never widens the result.
+    left = vast.IntConst("32'd1")
+    right = vast.Identifier("amount")
+    ctx = _Ctx(signal_size={"amount": "6"})
+    assert infer_width(vast.Sll(left, right), ctx) == WidthExpr(32, "32")
+    assert infer_width(vast.Srl(left, right), ctx) == WidthExpr(32, "32")
 
 
 def test_infer_width_refuses_division() -> None:

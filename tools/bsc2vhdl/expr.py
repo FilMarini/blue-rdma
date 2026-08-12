@@ -40,6 +40,43 @@ _RELATIONAL_OPS = {
 
 _BITWISE_OPS = {vast.And: "and", vast.Or: "or", vast.Xor: "xor"}
 
+_SHIFT_OPS = {vast.Sll: "shift_left", vast.Srl: "shift_right"}
+
+def _qualify_for_cast(node, text: str) -> str:
+    """Pin an ambiguous subexpression's type before it reaches a type
+    conversion (`unsigned(...)`/`signed(...)`) or an equality against
+    another equally ambiguous operand.
+
+    A bare literal, and a `resize(...)` call wrapping one (`_fit`'s own
+    resize wrap never itself qualifies: it has no visibility into whatever
+    the caller does with its return value), render as VHDL text
+    simultaneously compatible with more than one of
+    `slv`/`unresolved_unsigned`/`unresolved_signed`: `std_logic_1164` and
+    `numeric_std` both provide `&`/literal-typing/`resize` rules reaching
+    all three, so GHDL's overload resolution cannot pick one on its own
+    once the surrounding context does not concretely anchor it either.
+    `toSlv(...)`/`slvAll(...)` are each a single, already-`slv`-typed
+    function call -- `_render_int_const`'s `toSlv(...)` branch in
+    particular never reaches `_fit` at all -- so neither is ever
+    qualified, on pain of a redundant qualifier changing this module's own
+    already-committed output text for no analysis-relevant reason. A
+    genuine `&`-chain (a `Concat` of more than one piece; `_render_concat`
+    itself returns its lone piece's own text unchanged, with no wrapping
+    parens at all, when there is only one) carries the identical
+    ambiguity. A name, a bit-select, or any other function call already
+    carries a fixed type from its own declaration or return type and is
+    never qualified.
+    """
+    if isinstance(node, vast.IntConst):
+        if text.startswith("toSlv("):
+            return text
+        if text.startswith("'"):
+            return f"sl'({text})"
+        return f"slv'({text})"
+    if isinstance(node, vast.Concat) and len(node.list) > 1:
+        return f"slv'({text})"
+    return text
+
 
 def render_expression(node, ctx, target_width: str | None = None) -> str:
     if isinstance(node, vast.Identifier):
@@ -60,6 +97,8 @@ def render_expression(node, ctx, target_width: str | None = None) -> str:
         return _render_bitwise_not(node, ctx, target_width)
     if isinstance(node, (vast.Plus, vast.Minus)):
         return _render_arith_chain(node, ctx, target_width)
+    if isinstance(node, tuple(_SHIFT_OPS)):
+        return _render_shift(node, ctx, target_width)
     if isinstance(node, vast.Cond):
         return _render_cond(node, ctx, target_width)
     if isinstance(node, vast.Concat):
@@ -74,6 +113,17 @@ def render_expression(node, ctx, target_width: str | None = None) -> str:
 
 
 def _fit(text: str, self_width: _width.WidthExpr, target_width: str | None, node, ctx) -> str:
+    # `StdRtlPkg.resize`, `numeric_std.resize` (twice, `unresolved_unsigned`
+    # and `unresolved_signed`), a bare multi-bit string literal, and a
+    # `&`-chain are all mutually compatible, ambiguously, the moment some
+    # *outer* caller wraps this call's own result in
+    # `unsigned(...)`/`signed(...)` or compares it against an equally
+    # ambiguous operand. This function has no visibility into whatever the
+    # caller does with its return value, so it never qualifies here;
+    # `_qualify_for_cast` does that at each of the handful of call sites
+    # that actually need it, wrapping this function's *entire* output
+    # (bare or already `resize(...)`-wrapped, either way) rather than
+    # reaching inside it.
     if target_width is None or self_width.text == target_width:
         return text
     if self_width.value is not None and target_width.isdigit():
@@ -128,11 +178,33 @@ def _comparison_width(left_node, right_node, ctx) -> str | None:
     return combined.text
 
 
+def _is_ambiguous_operand(node, text: str) -> bool:
+    """True exactly when `node`'s own rendering (`text`) is a bare literal,
+    a `resize(...)` call wrapping one, or a genuine `&`-chain -- the shapes
+    `_qualify_for_cast` pins -- never merely because `node` is an
+    `IntConst`/`Concat` node whose own rendering already resolved to an
+    unambiguous function call (`toSlv(...)`, `slvAll(...)`, or a
+    single-piece `Concat`'s bare passthrough)."""
+    if isinstance(node, vast.IntConst):
+        return not text.startswith("toSlv(")
+    if isinstance(node, vast.Concat):
+        return len(node.list) > 1
+    return False
+
+
 def _render_equality(node, ctx, target_width: str | None) -> str:
     op_text = _EQUALITY_OPS[type(node)]
     compared_width = _comparison_width(node.left, node.right, ctx)
     left = render_expression(node.left, ctx, target_width=compared_width)
     right = render_expression(node.right, ctx, target_width=compared_width)
+    if _is_ambiguous_operand(node.left, left) and _is_ambiguous_operand(node.right, right):
+        # Neither side anchors the comparison's type on its own (both are
+        # built from a literal/`&`-chain shape, `mkQP.v`'s
+        # `(sig & "0000000" & sig) = "0000...0001"` among them), so `=`'s
+        # `slv`/`unresolved_unsigned`/`unresolved_signed` overloads are all
+        # simultaneously satisfiable without an explicit qualifier.
+        left = _qualify_for_cast(node.left, left)
+        right = _qualify_for_cast(node.right, right)
     core = f"{left} {op_text} {right}"
     if target_width is None:
         return core
@@ -144,6 +216,8 @@ def _render_relational(node, ctx, target_width: str | None) -> str:
     compared_width = _comparison_width(node.left, node.right, ctx)
     left = render_expression(node.left, ctx, target_width=compared_width)
     right = render_expression(node.right, ctx, target_width=compared_width)
+    left = _qualify_for_cast(node.left, left)
+    right = _qualify_for_cast(node.right, right)
     core = f"unsigned({left}) {op_text} unsigned({right})"
     if target_width is None:
         return core
@@ -228,7 +302,7 @@ def _render_arith_chain(node, ctx, target_width: str | None) -> str:
     terms, ops = _flatten_arith_chain(node)
     widths = [_width.infer_width(term, ctx) for term in terms]
     width = _effective_width(target_width, *widths)
-    rendered = [render_expression(term, ctx, target_width=width) for term in terms]
+    rendered = [_qualify_for_cast(term, render_expression(term, ctx, target_width=width)) for term in terms]
 
     pieces = [f"unsigned({rendered[0]})"]
     for op, term_text in zip(ops, rendered[1:]):
@@ -236,9 +310,47 @@ def _render_arith_chain(node, ctx, target_width: str | None) -> str:
     return f"slv({' '.join(pieces)})"
 
 
+def _render_shift(node, ctx, target_width: str | None) -> str:
+    """`<<`/`>>` (`vast.Sll`/`vast.Srl`): `ieee.numeric_std.shift_left`/
+    `shift_right` on the left operand, by an amount converted to a plain
+    `natural` via `to_integer(unsigned(...))`. The left operand is rendered
+    at the shift's own self-determined width -- `width.infer_width`
+    already defines that as the left operand's own width, never widened by
+    the shift amount -- and the right operand (the shift amount) is
+    rendered at its own self-determined width (`target_width=None`), per
+    the same self-determined/context-determined split every other operand
+    in this module follows.
+    """
+    op_name = _SHIFT_OPS[type(node)]
+    self_width = _width.infer_width(node, ctx)
+    left = _qualify_for_cast(node.left, render_expression(node.left, ctx, target_width=self_width.text))
+    amount = _qualify_for_cast(node.right, render_expression(node.right, ctx, target_width=None))
+    core = f"slv({op_name}(unsigned({left}), to_integer(unsigned({amount}))))"
+    return _fit(core, self_width, target_width, node, ctx)
+
+
 def _render_boolean_condition(node, ctx) -> str:
-    if isinstance(node, tuple(_EQUALITY_OPS) + tuple(_RELATIONAL_OPS) + (vast.Land, vast.Lor, vast.Ulnot)):
+    """Render `node` as a genuine VHDL `boolean` -- `ite`'s `i` parameter
+    is strictly `boolean`, with no implicit conversion from `sl`.
+
+    `Land`/`Lor`/`Ulnot` recurse into their own operands through this same
+    function rather than delegating the whole subtree to
+    `render_expression`: that general renderer's `_render_logical_binary`/
+    `_render_logical_not` produce an `sl` result (VHDL's `and`/`or`/`not`
+    overload for `std_ulogic`, the type every other value-context operand
+    in this module is), not `boolean`, and `mkQP.v`'s multi-term `?:`
+    conditions are the first case in the corpus deep enough to reach a
+    `Land`/`Lor`/`Ulnot` as this function's own top-level argument rather
+    than only as an interior operand of some other value expression.
+    """
+    if isinstance(node, tuple(_EQUALITY_OPS) + tuple(_RELATIONAL_OPS)):
         return render_expression(node, ctx, target_width=None)
+    if isinstance(node, vast.Land):
+        return f"({_render_boolean_condition(node.left, ctx)} and {_render_boolean_condition(node.right, ctx)})"
+    if isinstance(node, vast.Lor):
+        return f"({_render_boolean_condition(node.left, ctx)} or {_render_boolean_condition(node.right, ctx)})"
+    if isinstance(node, vast.Ulnot):
+        return f"(not {_render_boolean_condition(node.right, ctx)})"
     if isinstance(node, vast.Identifier) and ctx.is_param(node.name):
         return f"({ctx.generic_name[node.name]} /= 0)"
     text = render_expression(node, ctx, target_width=None)
@@ -249,15 +361,31 @@ def _render_cond(node: vast.Cond, ctx, target_width: str | None) -> str:
     true_width = _width.infer_width(node.true_value, ctx)
     false_width = _width.infer_width(node.false_value, ctx)
     width = _effective_width(target_width, true_width, false_width)
-    true_text = render_expression(node.true_value, ctx, target_width=width)
-    false_text = render_expression(node.false_value, ctx, target_width=width)
+    true_text = _qualify_for_cast(node.true_value, render_expression(node.true_value, ctx, target_width=width))
+    false_text = _qualify_for_cast(node.false_value, render_expression(node.false_value, ctx, target_width=width))
     cond_text = _render_boolean_condition(node.cond, ctx)
     return f"ite({cond_text}, {true_text}, {false_text})"
 
 
+_BOOLEAN_RESULT_TYPES = tuple(_EQUALITY_OPS) + tuple(_RELATIONAL_OPS) + (vast.Land, vast.Lor, vast.Ulnot)
+
+
 def _render_concat(node: vast.Concat, ctx, target_width: str | None) -> str:
     self_width = _width.infer_width(node, ctx)
-    pieces = [render_expression(item, ctx, target_width=None) for item in node.list]
+    pieces = []
+    for item in node.list:
+        # A comparison or logical operand (`mkQP.v` concatenates one
+        # directly, unwrapped by any surrounding `Land`/`Lor`, into a
+        # multi-bit selector) is context-determined to a plain VHDL
+        # `boolean` at `target_width=None`, the shape
+        # `_render_boolean_condition` wants; `&` needs an `sl` value on
+        # every operand instead, so this passes `target_width="1"` for
+        # exactly the boolean-result node types, the same width
+        # `_render_logical_binary` already hands its own two operands, and
+        # lets `_render_equality`/`_render_relational`/etc.'s own
+        # `toSl(...)` wrap do the conversion.
+        item_target = "1" if isinstance(item, _BOOLEAN_RESULT_TYPES) else None
+        pieces.append(render_expression(item, ctx, target_width=item_target))
     core = pieces[0] if len(pieces) == 1 else "(" + " & ".join(pieces) + ")"
     return _fit(core, self_width, target_width, node, ctx)
 
@@ -305,7 +433,7 @@ def _render_pointer(node: vast.Pointer, ctx, target_width: str | None) -> str:
         # `is_memory` is False path below) never occurs with a non-constant
         # index anywhere in the corpus, so that path is left exactly as it
         # was before memory support existed.
-        index_text = render_expression(node.ptr, ctx, target_width=None)
+        index_text = _qualify_for_cast(node.ptr, render_expression(node.ptr, ctx, target_width=None))
         core = f"{base}(to_integer(unsigned({index_text})))"
         self_width = _width.infer_width(node, ctx)
         return _fit(core, self_width, target_width, node, ctx)
