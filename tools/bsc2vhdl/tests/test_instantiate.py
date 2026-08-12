@@ -23,7 +23,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from tools.bsc2vhdl.emit import emit_vhdl
-from tools.bsc2vhdl.instantiate import component_declarations, dropped_parameter_overrides, instantiations
+from tools.bsc2vhdl.instantiate import (
+    _extract_type_text,
+    component_declarations,
+    dropped_parameter_overrides,
+    instantiations,
+)
 from tools.bsc2vhdl.parser import parse_module
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -131,6 +136,28 @@ def test_dropped_guarded_override_is_recorded_in_the_namemap_helper(tmp_path: Pa
     assert "u_flag.guarded" not in dropped
 
 
+def test_extract_type_text_distinguishes_mid_list_vector_from_last_scalar() -> None:
+    # Both a mid-list vector port and a last-in-clause scalar port end in
+    # the bare string suffix `");"`, but the `)` means something different
+    # in each: for the vector it closes the type's own `slv(...)`, followed
+    # by the ordinary mid-list `;`; for the scalar it is the port clause's
+    # own closing paren glued directly after `sl` with no separator at all.
+    # A fixed-length suffix strip cannot tell these apart; `_extract_type_
+    # text` must, via paren depth.
+    assert _extract_type_text("slv(7 downto 0);") == "slv(7 downto 0)"
+    assert _extract_type_text("sl);") == "sl"
+    assert _extract_type_text("sl;") == "sl"
+    assert _extract_type_text("slv(WIDTH_G-1 downto 0);") == "slv(WIDTH_G-1 downto 0)"
+    # A vector type as the very last port in the clause: its own `)` closes
+    # at depth 0 first, so the port clause's *own* trailing `);` is never
+    # consumed as part of the type text.
+    assert _extract_type_text("slv(7 downto 0));") == "slv(7 downto 0)"
+    # Not a genuine single-line-terminated port declaration (no `;`
+    # anywhere, and no balanced closing paren either): skipped, not
+    # misparsed.
+    assert _extract_type_text("slv(7 downto 0") is None
+
+
 def test_unconnected_port_defaults_to_open_scalar_output(tmp_path: Path) -> None:
     module_ir = _parse(tmp_path, _probe_source(instances_first=_PARAM_MOD_INSTANCES, instances_second=_FLAG_MOD_INSTANCE))
     component_text = "\n".join(component_declarations(module_ir, _Ctx()))
@@ -138,6 +165,57 @@ def test_unconnected_port_defaults_to_open_scalar_output(tmp_path: Path) -> None
 
     assert "UNUSED_OUT : out sl" in component_text
     assert "UNUSED_OUT => open" in instantiation_text
+
+
+def test_unconnected_port_takes_its_shape_from_a_real_committed_entity_when_one_exists(tmp_path: Path) -> None:
+    """`FlagMod`'s own `UNUSED_OUT` is left entirely unconnected (see
+    `_FLAG_MOD_INSTANCE`) and has no A/B-paired sibling port, so the
+    instantiation site alone gives no way to tell it apart from a genuinely
+    scalar result. mkTransportLayer.v's own `mkQP` instance hits exactly
+    this shape for twelve real `statusSQ_comm_get*` outputs: this proves
+    the fix by writing a real `FlagMod.vhd` entity next to the probe
+    source, declaring `UNUSED_OUT` as a vector, and confirming the
+    component declaration picks that real shape up instead of defaulting
+    to `sl`.
+    """
+    (tmp_path / "FlagMod.vhd").write_text(
+        "entity FlagMod is\n"
+        "   port (\n"
+        "      CLK        : in  sl;\n"
+        "      FLAG       : out sl;\n"
+        "      UNUSED_OUT : out slv(7 downto 0));\n"
+        "end FlagMod;\n"
+    )
+    module_ir = _parse(tmp_path, _probe_source(instances_first=_PARAM_MOD_INSTANCES, instances_second=_FLAG_MOD_INSTANCE))
+    component_text = "\n".join(component_declarations(module_ir, _Ctx()))
+
+    flag_start = component_text.index("component FlagMod is")
+    flag_end = component_text.index("end component;", flag_start)
+    flag_block = component_text[flag_start:flag_end]
+    assert "UNUSED_OUT : out slv(7 downto 0)" in flag_block
+
+
+def test_a_connected_port_is_never_overridden_by_a_real_committed_entity(tmp_path: Path) -> None:
+    """The committed-entity backstop only ever fills in a port this file's
+    own derivation had no other way to resolve (unconnected everywhere,
+    no A/B-paired sibling). A committed entity disagreeing with an already
+    -connected port's derived shape must never silently override it."""
+    (tmp_path / "FlagMod.vhd").write_text(
+        "entity FlagMod is\n"
+        "   port (\n"
+        "      CLK        : in  slv(3 downto 0);\n"
+        "      FLAG       : out sl;\n"
+        "      UNUSED_OUT : out sl);\n"
+        "end FlagMod;\n"
+    )
+    module_ir = _parse(tmp_path, _probe_source(instances_first=_PARAM_MOD_INSTANCES, instances_second=_FLAG_MOD_INSTANCE))
+    component_text = "\n".join(component_declarations(module_ir, _Ctx()))
+
+    flag_start = component_text.index("component FlagMod is")
+    flag_end = component_text.index("end component;", flag_start)
+    flag_block = component_text[flag_start:flag_end]
+    assert "CLK" in flag_block and ": in " in flag_block.split("CLK")[1].split(";")[0]
+    assert "slv(3 downto 0)" not in flag_block
 
 
 def test_direction_inferred_from_driven_names_matches_a_real_datapath(tmp_path: Path) -> None:

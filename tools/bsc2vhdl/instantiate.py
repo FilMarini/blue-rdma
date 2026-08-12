@@ -42,17 +42,126 @@ itself, never by reading a `.vhd` file and never from a manifest:
     therefore gets no generic clause at all).
 
 Accepted risk, matching D-04: if a hand-written entity's real signature
-ever deviates from this rule, the mismatch surfaces as a GHDL binding
-error once that entity is actually elaborated against, in a later phase,
-never inside this transpiler. A signature manifest could be layered on
-then without touching this module's own derivation logic.
+ever deviates from this rule, the mismatch would otherwise surface only as
+a GHDL binding error once that entity is actually elaborated against, in a
+later phase, never inside this transpiler. `_load_committed_entity_ports`
+closes exactly the one shape of that risk a real corpus file has hit so
+far -- a port left unconnected on every instance, with no A/B-paired
+sibling, whose real entity turns out not to be scalar there (`mkQP`'s own
+`statusSQ_comm_get*` status outputs, as seen from `mkTransportLayer.v`) --
+by reading the referenced module's own already-promoted `.vhd` entity when
+one exists next to the file being transpiled, layered on top of the
+instantiation-site derivation rather than replacing it: every other port,
+and every referenced module with no committed `.vhd` yet, is completely
+unaffected.
 """
 from __future__ import annotations
+
+import re
 
 from . import strip as _strip
 from .errors import UnsupportedConstruct
 
 INDENT = "   "
+
+# Matches one port line's name/mode/rest-of-line prefix inside a real VHDL
+# entity's port clause, the same shape `_render_component_port_clause` below
+# emits: `"{name}: {direction} {type_text}{terminator}"`. Deliberately stops
+# at the direction keyword rather than trying to also capture the type text
+# in the same regex: the very last port in a clause has its type glued
+# directly to the port list's own closing `)` with no separating
+# whitespace or intervening `;` (`... : out sl);`), and a vector type like
+# `slv(N downto 0)` already ends in its own `)` followed by an ordinary
+# mid-list `;` (`... : out slv(7 downto 0);`) -- the trailing two
+# characters read identically as a bare string suffix (`");"` either way),
+# so telling them apart needs the type text's own paren balance, not a
+# fixed-length suffix strip. `_extract_type_text` below does that by
+# tracking paren depth instead.
+_ENTITY_PORT_PREFIX_RE = re.compile(r"^\s*(\w+)\s*:\s*(in|out)\s+(.*)$")
+
+
+def _extract_type_text(rest_of_line: str) -> str | None:
+    """Return the bare type text from `rest_of_line` (everything on a port
+    line after the mode keyword), stopping at whichever comes first: a
+    `;` at paren depth 0 (an ordinary mid-list port separator, or -- for a
+    scalar `sl` type -- the port clause's own closing `)` glued directly
+    after it with no separator at all), or the `)` that closes a vector
+    type's own opening `(` (immediately followed by nothing, a `;`, or the
+    port clause's own closing `)` -- none of which need to be parsed here,
+    since the type text itself is already complete once its own paren
+    balances back to zero). Returns `None` if the line never reaches paren
+    depth 0 again or never terminates (not a genuine, single-line-
+    terminated port declaration -- skipped rather than misparsed)."""
+    stripped = rest_of_line.rstrip()
+    depth = 0
+    for index, char in enumerate(stripped):
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            if depth == 0:
+                # Never opened a paren of its own up to here: this `)`
+                # belongs to the port clause, not the type (the scalar-type,
+                # last-port shape, `sl);`).
+                return stripped[:index] or None
+            depth -= 1
+            if depth == 0:
+                # Just closed the type's own outermost `(`; whatever comes
+                # next (nothing, `;`, or the port clause's own `)`) is
+                # terminator, not type text.
+                return stripped[: index + 1]
+        elif char == ";" and depth == 0:
+            return stripped[:index] or None
+    return None
+
+
+def _load_committed_entity_ports(module_name: str, module_ir) -> dict[str, tuple[str, str]] | None:
+    """Read a referenced module's own already-promoted `<module_name>.vhd`
+    entity port clause, if one exists next to the file being transpiled.
+
+    Ground truth from a real committed entity corrects the one documented
+    weak point of `_port_signature`'s instantiation-site-only derivation: a
+    port left unconnected on every instance, with no A/B-paired sibling to
+    borrow a shape from, defaults to a scalar `out` (see `_render_
+    component`'s own comment), which is wrong whenever the real entity is
+    actually a vector there. `mkTransportLayer.v`'s single `mkQP` instance
+    is the corpus's first case of this: twelve of `mkQP`'s own `statusSQ_
+    comm_get*` status outputs are left entirely unconnected (`mkTransport
+    Layer.v` never reads them), and none of them has an A/B-paired sibling
+    name, so the existing backstop cannot reach them.
+
+    This is exactly the "signature manifest... layered on without touching
+    this module's own derivation logic" the module docstring's own
+    accepted-risk note names as the resolution once a real committed entity
+    exists to check against. `_render_component` only ever consults this for
+    a port its own derivation already defaulted to `("out", "sl")` with no
+    connected actual anywhere, so a module with no committed `.vhd` yet
+    (every other referenced module in this corpus, at the time this file
+    is transpiled) is completely unaffected, and no already-correct
+    instantiation-site derivation is ever second-guessed.
+    """
+    sibling_path = module_ir.source_path.parent / f"{module_name}.vhd"
+    if not sibling_path.is_file():
+        return None
+    text = sibling_path.read_text()
+    entity_match = re.search(
+        rf"^entity\s+{re.escape(module_name)}\s+is\b.*?^end\s+{re.escape(module_name)}\s*;",
+        text,
+        re.DOTALL | re.IGNORECASE | re.MULTILINE,
+    )
+    if entity_match is None:
+        return None
+    ports: dict[str, tuple[str, str]] = {}
+    for line in entity_match.group(0).splitlines():
+        prefix_match = _ENTITY_PORT_PREFIX_RE.match(line)
+        if prefix_match is None:
+            continue
+        name, direction, rest_of_line = prefix_match.groups()
+        type_text = _extract_type_text(rest_of_line)
+        if type_text is None:
+            continue
+        ports[name] = (direction, type_text)
+    return ports or None
+
 
 # `guarded` has no effect on any output port anywhere in the corpus: every
 # reference to it lives inside the `$display`-guarded error-reporting block
@@ -340,6 +449,23 @@ def _render_component(module_name: str, instances: list, module_ir, driven_names
         if sibling_type == "sl" or sibling_direction != direction:
             continue
         signatures[port_name] = (direction, sibling_type)
+
+    # Second-line backstop for whatever the A/B-sibling override above still
+    # leaves at the unconnected-scalar default: a real committed entity for
+    # this module, if one already exists on disk (see
+    # `_load_committed_entity_ports`'s own docstring), is strictly better
+    # information than a guess, and only ever overrides a port this file's
+    # own derivation had no other way to resolve.
+    committed_ports = _load_committed_entity_ports(module_name, module_ir)
+    if committed_ports is not None:
+        for port_name in port_names:
+            direction, type_text = signatures[port_name]
+            if type_text != "sl" or _has_connected_actual(port_name, instances):
+                continue
+            real = committed_ports.get(port_name)
+            if real is None or real[1] == "sl" or real[0] != direction:
+                continue
+            signatures[port_name] = real
 
     port_entries = [(port_name, *signatures[port_name]) for port_name in port_names]
 
