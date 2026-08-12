@@ -88,6 +88,76 @@ tool has not been taught, and the fix belongs in the tool.
   BSC's own `ifdef` guards, are stripped without dropping the
   synthesis-relevant code that shares the same block.
 
+## Phase 4 census: mkQP, mkTransportLayer, mkAxisTransportLayer
+
+A `--survey` census over the three generated blue-rdma modules
+(`mkQP.v`, `mkTransportLayer.v`, `mkAxisTransportLayer.v`) found exactly two
+distinct out-of-subset construct names, both inside `always` sensitivity-list
+handling. No other construct name appears anywhere in the census output.
+
+| Construct | `mkQP.v` | `mkTransportLayer.v` | `mkAxisTransportLayer.v` | Representative `file:line` |
+|-----------|---------:|----------------------:|--------------------------:|-----------------------------|
+| `always` block with more than one sensitivity item | 153 | 24 | 0 | `mkTransportLayer.v:4364` |
+| `always` block sensitivity edge `'negedge'` | 1 | 1 | 0 | `mkQP.v:24731` |
+| **Total** | **154** | **25** | **0** |  |
+
+Command run (from this repository's root, `$SURF` pointing at a surf checkout):
+
+```
+python -m tools.bsc2vhdl --survey \
+    $SURF/ethernet/RoCEv2/blue-rdma/mkQP.v \
+    $SURF/ethernet/RoCEv2/blue-rdma/mkTransportLayer.v \
+    $SURF/ethernet/RoCEv2/blue-rdma/mkAxisTransportLayer.v
+```
+
+Output: `survey: 154 refusal(s) in .../mkQP.v`, `survey: 25 refusal(s) in
+.../mkTransportLayer.v`, `survey: 0 refusal(s) in
+.../mkAxisTransportLayer.v`, `survey total: 179 refusal(s) across 3 file(s)`,
+exit 0.
+
+**Is the multi-item level-sensitive `always` block the only gap, or merely
+the first?** Merely the first. The census found one other distinct
+construct name: an `always` block whose single sensitivity item is
+`negedge` rather than `posedge` or `level` (`mkQP.v:24731` and
+`mkTransportLayer.v:6691`, one occurrence each). `mkAxisTransportLayer.v`
+triggers neither refusal. Both refusal shapes are raised from the same
+sensitivity-list check (`_check_always_sensitivity` in `parser.py`); the
+census's per-file totals (154 for `mkQP.v`, 25 for `mkTransportLayer.v`) are
+each one higher than a count of multi-item blocks alone would suggest,
+because each file also carries exactly one `negedge` block.
+
+**Does an `initial`-shaped refusal appear for `mkTransportLayer.v` or
+`mkQP.v`?** No. Neither file's `initial` block (`mkTransportLayer.v:6602`,
+`mkQP.v:24562`) appears anywhere in the census output: `grep` for those two
+line numbers in the captured census text returns nothing. `parse_module`'s
+own item dispatch routes an `Initial` node through
+`_strip.is_simulation_only` before it ever reaches a refusal check, so both
+`initial` blocks reach the emit path without incident, the same as every
+already-transpiled file that carries one.
+
+**Exit-code behavior.** Without `--survey`, the tool exits 1 on a refusal
+and writes nothing for the refused input file; a caller checking only the
+exit status correctly detects that at least one input refused. With a
+multi-file invocation (survey or otherwise), one exit code covers the whole
+run, so per-file attribution still requires reading stdout/stderr rather
+than the exit status alone.
+
+**`// synopsys parallel_case` no-change finding, verified.** The corpus
+carries 14 such pragma comments (4 in `mkTransportLayer.v`, 10 in `mkQP.v`,
+0 in `mkAxisTransportLayer.v`). Verified by direct search that no module
+under `tools/bsc2vhdl/` (including `caseconv.py`) contains the pragma
+token anywhere:
+
+```
+grep -rn "parallel_case" tools/bsc2vhdl/
+```
+
+returns no matches. pyverilog strips comments before parsing, so the
+pragma never reaches the AST `caseconv.py` walks; `caseconv.py`'s existing
+plain-`case` path already renders these blocks as an ordered if/elsif
+chain, which is exactly the first-match semantics Icarus simulates and the
+equivalence gate compares. No emitter change is needed for these 14 blocks.
+
 ## Notable exclusions
 
 - `generate` / `endgenerate`: refused. A census across every real BSC target
