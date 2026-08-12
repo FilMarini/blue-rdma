@@ -134,6 +134,30 @@ def test_render_case_plain_case_emits_vhdl_case_with_when_others() -> None:
     assert lines[-1] == "end case;"
 
 
+def test_render_case_plain_case_single_bit_selector_uses_character_literals() -> None:
+    # A single-bit selector (a scalar signal, or a plain-vector bit-select,
+    # which `_render_pointer` always renders as a bare `sig(index)` of type
+    # `sl`/STD_ULOGIC) needs a character literal ('0'/'1'), never a
+    # bit-string literal ("0"/"1"): GHDL rejects "can't match string
+    # literal with type STD_ULOGIC" for the latter. mkTransportLayer.v's
+    # own `case (pdMetaData_pdMrVec_0_mrTagVec_reqQ_D_OUT[0])` (a
+    # plain-vector bit-select) is exactly this shape.
+    selector = vast.Identifier("sel")
+    node = vast.CaseStatement(
+        selector,
+        [
+            _case_arm("1'd0", "q", "1'b0"),
+            _case_arm("1'd1", "q", "1'b1"),
+        ],
+    )
+    lines = render_case(node, _Ctx(), indent=0)
+    assert lines[0] == "case sel is"
+    assert any(line.strip() == "when '0' =>" for line in lines)
+    assert any(line.strip() == "when '1' =>" for line in lines)
+    assert 'when "0"' not in "\n".join(lines)
+    assert 'when "1"' not in "\n".join(lines)
+
+
 def test_render_case_sizedfifo_casez_statements_have_no_case_keyword_and_preserve_order() -> None:
     casez_nodes = _parse_sizedfifo()
     assert len(casez_nodes) == 2

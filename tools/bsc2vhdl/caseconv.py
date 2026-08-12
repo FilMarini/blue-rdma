@@ -195,6 +195,22 @@ def _render_plain_case(node, ctx, indent: int) -> list[str]:
     selector_text = _expr.render_expression(comp_node, ctx, target_width=None)
     lines = [f"{pad}case {selector_text} is"]
 
+    # A single-bit selector (a scalar signal, or a plain-vector bit-select,
+    # which `_render_pointer` always renders as a bare `sig(index)` of type
+    # `sl`/STD_ULOGIC) needs a character literal ('0'/'1') for each choice,
+    # never a bit-string literal ("0"/"1"): VHDL's STD_ULOGIC has no
+    # implicit conversion from a one-character STRING. A multi-bit selector
+    # keeps the existing bit-string-literal rendering. Every arm's own
+    # literal width already has to match the selector's width for the
+    # source Verilog to have been legal, so the first arm's width stands in
+    # for the selector's own.
+    for arm in node.caselist:
+        if arm.cond:
+            selector_is_scalar = parse_sized_literal(arm.cond[0].value).width == 1
+            break
+    else:
+        selector_is_scalar = False
+
     default_arm = None
     for arm in node.caselist:
         if not arm.cond:
@@ -203,8 +219,11 @@ def _render_plain_case(node, ctx, indent: int) -> list[str]:
         choices = []
         for pattern in arm.cond:
             literal = parse_sized_literal(pattern.value)
-            bits = format(literal.value, f"0{literal.width}b")
-            choices.append(f'"{bits}"')
+            if selector_is_scalar:
+                choices.append("'1'" if literal.value else "'0'")
+            else:
+                bits = format(literal.value, f"0{literal.width}b")
+                choices.append(f'"{bits}"')
         lines.append(f"{pad}{INDENT}when {' | '.join(choices)} =>")
         lines.extend(_render_body(arm.statement, ctx, indent + 2))
 
