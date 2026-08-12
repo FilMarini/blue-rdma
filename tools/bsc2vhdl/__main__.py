@@ -23,6 +23,7 @@ from .emit import emit_vhdl
 from .errors import UnsupportedConstruct
 from .mangle import NameMap
 from .parser import parse_module
+from .provenance import ManifestEntry, build_manifest, manifest_entry
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -54,7 +55,7 @@ def _atomic_write(path: Path, text: str) -> None:
         raise
 
 
-def _process_one(input_path: Path, out_dir: Path) -> None:
+def _process_one(input_path: Path, out_dir: Path) -> ManifestEntry:
     module_ir = parse_module(input_path)
     vhdl_text = emit_vhdl(module_ir)
 
@@ -78,23 +79,38 @@ def _process_one(input_path: Path, out_dir: Path) -> None:
     _atomic_write(vhdl_path, vhdl_text)
     _atomic_write(namemap_path, namemap_text)
 
+    return manifest_entry(input_path, vhdl_path.name, vhdl_text)
+
 
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     out_dir = Path(args.out_dir).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    if args.manifest is not None:
-        Path(args.manifest).write_text("{}\n")
-
     exit_code = 0
+    entries: list[ManifestEntry] = []
     for raw_input in args.inputs:
         input_path = Path(raw_input)
         try:
-            _process_one(input_path, out_dir)
+            entries.append(_process_one(input_path, out_dir))
         except UnsupportedConstruct as exc:
             print(str(exc), file=sys.stderr)
             exit_code = 1
+
+    if args.manifest is not None:
+        if exit_code == 0:
+            # A manifest that records a run which partly failed would be
+            # worse than no manifest: only write when every input in this
+            # invocation succeeded.
+            manifest_path = Path(args.manifest)
+            manifest_path.parent.mkdir(parents=True, exist_ok=True)
+            _atomic_write(manifest_path, build_manifest(entries))
+        else:
+            print(
+                f"refusing to write manifest {args.manifest}: at least one input failed",
+                file=sys.stderr,
+            )
+
     return exit_code
 
 
