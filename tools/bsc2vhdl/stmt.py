@@ -1,8 +1,8 @@
 """Statement rendering: Verilog AST node to VHDL text.
 
-This plan implements only blocking and nonblocking substitution,
-`begin`/`end` blocks, and `IfStatement`. A later plan owns `case` and
-`casez`.
+This plan implements blocking and nonblocking substitution, `begin`/`end`
+blocks, `IfStatement`, and delegates `CaseStatement`/`CasezStatement` to
+`caseconv.render_case`.
 
 Both substitution kinds render identically here (a VHDL signal
 assignment): the IR has no VHDL variables yet, and `RegN.v` only exercises
@@ -28,6 +28,10 @@ def render_statement(node, ctx, indent: int) -> list[str]:
         return _render_if(node, ctx, indent)
     if isinstance(node, (vast.BlockingSubstitution, vast.NonblockingSubstitution)):
         return _render_substitution(node, ctx, indent)
+    if isinstance(node, (vast.CaseStatement, vast.CasezStatement)):
+        from . import caseconv as _caseconv
+
+        return _caseconv.render_case(node, ctx, indent)
     raise UnsupportedConstruct(type(node).__name__, ctx.path, getattr(node, "lineno", 0))
 
 
