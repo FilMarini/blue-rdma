@@ -8,8 +8,15 @@ mechanism in pyverilog's preprocessor and none is needed.
 
 The default posture is refusal: any node class this walk does not
 recognize raises `UnsupportedConstruct` naming the node class and its
-line, including `GenerateStatement`, `inout` ports, and `TaskDef` even
-before those become reachable from the actual corpus.
+line, including `GenerateStatement`, `inout` ports, and `Task` even
+before those become reachable from the actual corpus. Two shapes get an
+explicit named check rather than relying on that generic fallback, because
+letting them through silently would misbehave instead of erroring: a port
+carrying a dimension list (an array-of-vectors port, which this walk's
+width handling does not account for at all), and an `always` block whose
+sensitivity list is anything other than a single `posedge` on one signal
+(a mixed edge/level sensitivity list, which the emitter's synchronous
+single-clock process shape cannot represent).
 """
 from __future__ import annotations
 
@@ -59,6 +66,7 @@ def parse_module(path: Path) -> ModuleIR:
             for decl in item.list:
                 _handle_decl(decl, path, params, port_directions, port_widths, signals)
         elif isinstance(item, vast.Always):
+            _check_always_sensitivity(item, path)
             always_blocks.append(item)
         elif _strip.is_simulation_only(item):
             initials.append(item)
@@ -67,6 +75,10 @@ def parse_module(path: Path) -> ModuleIR:
 
     ports: list[PortDecl] = []
     for port in module_def.portlist.ports:
+        if isinstance(port, vast.Ioport):
+            raise UnsupportedConstruct("Ioport", path, getattr(port, "lineno", 0))
+        if getattr(port, "dimensions", None) is not None:
+            raise UnsupportedConstruct("port dimension list", path, getattr(port, "lineno", 0))
         name = port.name
         direction = port_directions.get(name)
         if direction is None:
@@ -95,9 +107,13 @@ def _handle_decl(decl, path, params, port_directions, port_widths, signals) -> N
     elif isinstance(decl, vast.Inout):
         raise UnsupportedConstruct("inout port", path, getattr(decl, "lineno", 0))
     elif isinstance(decl, vast.Output):
+        if getattr(decl, "dimensions", None) is not None:
+            raise UnsupportedConstruct("port dimension list", path, getattr(decl, "lineno", 0))
         port_directions[decl.name] = "out"
         port_widths[decl.name] = _width_bounds(decl.width, path)
     elif isinstance(decl, vast.Input):
+        if getattr(decl, "dimensions", None) is not None:
+            raise UnsupportedConstruct("port dimension list", path, getattr(decl, "lineno", 0))
         port_directions[decl.name] = "in"
         port_widths[decl.name] = _width_bounds(decl.width, path)
     elif isinstance(decl, vast.Reg):
@@ -114,6 +130,27 @@ def _handle_decl(decl, path, params, port_directions, port_widths, signals) -> N
         )
     else:
         raise UnsupportedConstruct(type(decl).__name__, path, getattr(decl, "lineno", 0))
+
+
+def _check_always_sensitivity(always_node, path) -> None:
+    """Refuse an `always` block whose sensitivity list is not a single
+    `posedge` on one signal.
+
+    The emitter's process shape (`process (CLK) is ... if rising_edge(CLK)
+    then ...`) is single-clock, edge-triggered by construction; a mixed
+    edge/level list, more than one sensitivity item, or any edge other
+    than `posedge` has no VHDL translation this emitter can produce.
+    """
+    sens_items = always_node.sens_list.list
+    if len(sens_items) != 1:
+        raise UnsupportedConstruct(
+            "always block with more than one sensitivity item", path, getattr(always_node, "lineno", 0)
+        )
+    sens = sens_items[0]
+    if sens.type != "posedge":
+        raise UnsupportedConstruct(
+            f"always block sensitivity edge {sens.type!r}", path, getattr(always_node, "lineno", 0)
+        )
 
 
 def _width_bounds(width_node, path) -> tuple[str | None, str | None]:

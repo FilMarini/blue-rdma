@@ -4,10 +4,20 @@
 a nonzero exit. On any Verilog construct outside the supported BSC subset,
 a pass raises this naming the construct and its `file:line`, and the CLI
 writes nothing for that input file. No partial output, no stubs.
+
+The contract: a refusal names the construct first, then the location, and
+the caller writes nothing. `refusal_message` is the one place that message
+text is built, so every raise site and every test that matches against it
+stay in sync by construction.
 """
 from __future__ import annotations
 
 from pathlib import Path
+
+
+def refusal_message(construct: str, path: Path, lineno: int) -> str:
+    """Return the stable refusal text for `construct` at `path:lineno`."""
+    return f"{construct} at {path}:{lineno} is outside the supported BSC subset"
 
 
 class UnsupportedConstruct(Exception):
@@ -20,4 +30,4 @@ class UnsupportedConstruct(Exception):
         super().__init__(str(self))
 
     def __str__(self) -> str:
-        return f"{self.construct} at {self.path}:{self.lineno} is outside the supported BSC subset"
+        return refusal_message(self.construct, self.path, self.lineno)
