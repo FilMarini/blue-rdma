@@ -389,29 +389,46 @@ def _render_localparam_condition(node, path) -> str:
 
 
 def _check_always_sensitivity(always_node, path) -> None:
-    """Refuse an `always` block whose sensitivity list is not a single
-    `posedge` (a clocked process) or a single `level` item on one signal (a
-    combinational process, BSC's own idiom for a multiplexer with no
-    ordinary continuous-assign shape -- `mkAxisTransportLayer.v`'s sole
-    `always@(one_signal) case (...) ...` block takes this form).
+    """Refuse an `always` block whose sensitivity list is not one of:
+
+    - a single `posedge` item (a clocked process);
+    - a single `level` or `negedge` item on one signal (see below); or
+    - an arbitrary-length list where every item is `level` (a
+      combinational process with more than one input, BSC's own idiom for
+      a multiplexer with no ordinary continuous-assign shape --
+      `mkTransportLayer.v:4364` is a representative site).
 
     The emitter's clocked process shape (`process (CLK) is ... if
     rising_edge(CLK) then ...`) is single-clock, edge-triggered by
     construction; a combinational process has no such wrapper at all
     (`emit.py`'s `_render_process` branches on this same `sens.type`). A
-    mixed edge/level list, more than one sensitivity item, or any edge
-    other than `posedge`/`level` has no VHDL translation either shape can
-    produce.
+    mixed edge/level list, a `posedge` list of length other than one, or
+    any single-item edge other than `posedge`/`level`/`negedge` has no
+    VHDL translation either shape can produce, and is still refused with
+    the exact message text below.
+
+    A single `negedge` item is accepted at this shape-only check for the
+    same reason `parse_module`/`survey_module` never inspect a node's
+    content: every `negedge` block in the corpus (`mkQP.v:24731` and
+    `mkTransportLayer.v:6691`) is BSC's giant `synopsys
+    translate_off`/`translate_on`-wrapped assertion-and-`$display`
+    reporting block, and `strip.partition_always_blocks` drops it before
+    it ever reaches the renderer (`emit.py`'s `_render_process` refuses
+    outright if a `negedge` block ever survives that drop, so a future
+    file with a genuine functional `negedge` block fails loudly instead of
+    silently rendering as if it were `posedge`).
     """
     sens_items = always_node.sens_list.list
-    if len(sens_items) != 1:
+    if len(sens_items) == 1:
+        sens = sens_items[0]
+        if sens.type not in ("posedge", "level", "negedge"):
+            raise UnsupportedConstruct(
+                f"always block sensitivity edge {sens.type!r}", path, getattr(always_node, "lineno", 0)
+            )
+        return
+    if not all(item.type == "level" for item in sens_items):
         raise UnsupportedConstruct(
             "always block with more than one sensitivity item", path, getattr(always_node, "lineno", 0)
-        )
-    sens = sens_items[0]
-    if sens.type not in ("posedge", "level"):
-        raise UnsupportedConstruct(
-            f"always block sensitivity edge {sens.type!r}", path, getattr(always_node, "lineno", 0)
         )
 
 

@@ -1,6 +1,6 @@
 """Translates an `initial`-block power-on value into a VHDL signal default.
 
-Implements every idiom the corpus actually uses. Three classifications of
+Implements every idiom the corpus actually uses. Five classifications of
 an initial-block right-hand side, recognized structurally from the
 expression tree rather than by matching source text. First, a replication
 of the two-bit literal `2'b10` whose count is a parameter expression: a
@@ -13,8 +13,12 @@ element from `D_OUT` -- resolved through the name map. Fourth, a bare
 single-bit literal (`1'b1`, `1'b0`) on a scalar declaration -- the idiom
 every corpus status flag (`full_reg`, `empty_reg`, `ring_empty`,
 `not_ring_full`, `hasodata`, ...) uses, since a one-bit register has no
-replication syntax to write in the first place. Anything else raises
-`UnsupportedConstruct` naming the file and line.
+replication syntax to write in the first place. Fifth, a plain sized
+literal in any base directly initializing a vector register with no
+replication at all -- `mkQP.v`'s and `mkTransportLayer.v`'s giant
+`initial` block idiom (`cntrl_dqpnReg = 24'hAAAAAA;`), rendered as a
+quoted VHDL bit-string literal at the literal's own declared width.
+Anything else raises `UnsupportedConstruct` naming the file and line.
 
 The `bsvAltInit` formula comes from Verilog concatenation-then-truncation
 semantics: the repeated two-bit group is `2'b10`, so after truncation to
@@ -145,18 +149,44 @@ def _classify_initializer_rhs(rhs, decl, ctx) -> str:
                 return f"{_BSV_ALT_INIT_NAME}({size_expr})"
     if isinstance(rhs, vast.Identifier):
         return ctx.name_for(rhs.name)
-    if isinstance(rhs, vast.IntConst) and decl.is_scalar:
+    if isinstance(rhs, vast.IntConst):
         bits = _literal_bits(rhs.value, ctx, rhs)
-        if len(bits) == 1:
-            return f"'{bits}'"
+        if decl.is_scalar:
+            if len(bits) == 1:
+                return f"'{bits}'"
+        else:
+            # A plain (non-replicated) sized literal directly initializing a
+            # vector register -- `mkQP.v`'s and `mkTransportLayer.v`'s giant
+            # `initial` block uses this for every one of its scratch-value
+            # assignments (`cntrl_dqpnReg = 24'hAAAAAA;`,
+            # `sq_retryHandler_retryCntReg = 3'h2;`, ...), none of which is a
+            # replication of a one- or two-bit pattern. `_literal_bits`
+            # already renders the literal's own declared width as a bit
+            # string regardless of base, the same conversion
+            # `expr.py::_render_int_const` performs for a vector-context
+            # literal everywhere else in the emitter.
+            return f'"{bits}"'
     raise UnsupportedConstruct("initial-block pattern", ctx.path, getattr(rhs, "lineno", 0))
 
 
 def _literal_bits(text: str, ctx, node) -> str:
+    """Render a sized Verilog literal's own declared width as a plain bit
+    string, in any of the four bases BSC's own output uses. The binary path
+    keeps returning its digits verbatim (byte-identical to before this
+    function accepted other bases); the other three bases go through
+    `width.parse_int_literal` for the value and format it to the literal's
+    own size, matching `expr.py::_render_int_const`'s identical conversion.
+    """
     if "'" not in text:
         raise UnsupportedConstruct("decimal literal in initial block", ctx.path, getattr(node, "lineno", 0))
-    _, rest = text.split("'", 1)
+    prefix, rest = text.split("'", 1)
     base = rest[0].lower()
-    if base != "b":
+    if base == "b":
+        return rest[1:]
+    if base not in ("h", "o", "d"):
         raise UnsupportedConstruct("non-binary literal in initial block", ctx.path, getattr(node, "lineno", 0))
-    return rest[1:]
+    if not prefix:
+        raise UnsupportedConstruct("unsized literal in initial block", ctx.path, getattr(node, "lineno", 0))
+    width = int(prefix)
+    value = _width.parse_int_literal(text)
+    return format(value, f"0{width}b")

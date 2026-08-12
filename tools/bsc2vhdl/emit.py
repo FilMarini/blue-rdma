@@ -324,6 +324,12 @@ def _render_declarations(module_ir, ctx) -> tuple[list[str], set[str]]:
         if lines:
             lines.append("")
         lines.extend(component_lines)
+
+    bridge_lines = _instantiate.bridge_signal_declarations(module_ir)
+    if bridge_lines:
+        if lines:
+            lines.append("")
+        lines.extend(bridge_lines)
     return lines, used_helpers
 
 
@@ -403,8 +409,11 @@ def _render_body(module_ir, ctx, used_helpers) -> list[str]:
     # matching `component` declarations belong in the declarative part
     # instead (see `_render_declarations`), never here.
     instantiation_lines = _instantiate.instantiations(module_ir, ctx)
+    bridge_assign_lines = _instantiate.bridge_assignments(module_ir, ctx)
     if instantiation_lines:
         groups.append(instantiation_lines)
+    if bridge_assign_lines:
+        groups.append(bridge_assign_lines)
 
     assign_lines = [_render_assign(assign, ctx) for assign in module_ir.assigns]
     if assign_lines:
@@ -460,9 +469,20 @@ def _render_assign_value(rhs, target_width, ctx) -> str:
 
 
 def _render_process(always_node, ctx) -> list[str]:
-    sens = always_node.sens_list.list[0]
-    if sens.type == "level":
+    sens_items = always_node.sens_list.list
+    if all(item.type == "level" for item in sens_items):
         return _render_combinational_process(always_node, ctx)
+    sens = sens_items[0]
+    if sens.type == "negedge":
+        # No functional `negedge` block exists in the corpus today: both
+        # occurrences (`mkQP.v:24731`, `mkTransportLayer.v:6691`) are
+        # simulation-only assertion/`$display` reporting blocks that
+        # `strip.partition_always_blocks` drops before `_render_body` ever
+        # calls this function. Refusing here is a fail-safe, not a
+        # reachable path today -- silently reusing the `posedge` clocked
+        # process shape (`if rising_edge(...)`) for a `negedge` block would
+        # render the wrong edge with no error at all.
+        raise UnsupportedConstruct("functional negedge always block", ctx.path, getattr(always_node, "lineno", 0))
     clock_name = sens.sig.name
     lines = [
         f"{INDENT}process ({clock_name}) is",
@@ -478,15 +498,17 @@ def _render_process(always_node, ctx) -> list[str]:
 def _render_combinational_process(always_node, ctx) -> list[str]:
     """A `level`-sensitive `always` block: a pure multiplexer with no
     clock, so this carries no `if rising_edge(...)` wrapper at all -- the
-    one structural difference from a clocked process. The sensitivity
-    signal is a `ctx.name_for(...)` lookup, not the verbatim Verilog
-    spelling: a clocked process's own sensitivity signal is always a
-    top-level port (kept verbatim by D-14) and never needed this, but this
-    construct's sensitivity signal is an ordinary internal net, renamed
-    like every other one under D-15.
+    one structural difference from a clocked process. Every sensitivity
+    item is renamed through `ctx.name_for(...)`, not just the first: a
+    combinational block's sensitivity signals are ordinary internal nets
+    subject to the same rename rule as every other identifier (unlike a
+    clocked process's own sensitivity signal, always a top-level port kept
+    verbatim by D-14), and each is emitted in the Verilog's own list
+    order, one for one, so a reviewer can diff the VHDL sensitivity clause
+    against the Verilog `always@(...)` directly.
     """
-    sens_name = ctx.name_for(always_node.sens_list.list[0].sig.name)
-    lines = [f"{INDENT}process ({sens_name}) is", f"{INDENT}begin"]
+    sens_names = [ctx.name_for(item.sig.name) for item in always_node.sens_list.list]
+    lines = [f"{INDENT}process ({', '.join(sens_names)}) is", f"{INDENT}begin"]
     lines.extend(_stmt.render_statement(always_node.statement, ctx, indent=2))
     lines.append(f"{INDENT}end process;")
     return lines
