@@ -460,7 +460,10 @@ def _render_assign_value(rhs, target_width, ctx) -> str:
 
 
 def _render_process(always_node, ctx) -> list[str]:
-    clock_name = always_node.sens_list.list[0].sig.name
+    sens = always_node.sens_list.list[0]
+    if sens.type == "level":
+        return _render_combinational_process(always_node, ctx)
+    clock_name = sens.sig.name
     lines = [
         f"{INDENT}process ({clock_name}) is",
         f"{INDENT}begin",
@@ -468,5 +471,22 @@ def _render_process(always_node, ctx) -> list[str]:
     ]
     lines.extend(_stmt.render_statement(always_node.statement, ctx, indent=3))
     lines.append(f"{INDENT * 2}end if;")
+    lines.append(f"{INDENT}end process;")
+    return lines
+
+
+def _render_combinational_process(always_node, ctx) -> list[str]:
+    """A `level`-sensitive `always` block: a pure multiplexer with no
+    clock, so this carries no `if rising_edge(...)` wrapper at all -- the
+    one structural difference from a clocked process. The sensitivity
+    signal is a `ctx.name_for(...)` lookup, not the verbatim Verilog
+    spelling: a clocked process's own sensitivity signal is always a
+    top-level port (kept verbatim by D-14) and never needed this, but this
+    construct's sensitivity signal is an ordinary internal net, renamed
+    like every other one under D-15.
+    """
+    sens_name = ctx.name_for(always_node.sens_list.list[0].sig.name)
+    lines = [f"{INDENT}process ({sens_name}) is", f"{INDENT}begin"]
+    lines.extend(_stmt.render_statement(always_node.statement, ctx, indent=2))
     lines.append(f"{INDENT}end process;")
     return lines

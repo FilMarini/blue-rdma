@@ -309,7 +309,28 @@ def _render_pointer(node: vast.Pointer, ctx, target_width: str | None) -> str:
         core = f"{base}(to_integer(unsigned({index_text})))"
         self_width = _width.infer_width(node, ctx)
         return _fit(core, self_width, target_width, node, ctx)
-    index_text = render_expression(node.ptr, ctx, target_width=None)
+    index_text = _bit_select_index_text(node.ptr, ctx)
     core = f"{base}({index_text})"
     self_width = _width.WidthExpr(1, "1")
     return _fit(core, self_width, target_width, node, ctx)
+
+
+def _bit_select_index_text(ptr_node, ctx) -> str:
+    """Render a plain (non-memory) bit-select's index as VHDL text.
+
+    VHDL requires an `integer` here, never an `slv`/`sl` literal:
+    `signal(1)` is legal, `signal("000...01")` is not. `render_expression`
+    on a bare `IntConst` renders it as a vector or scalar literal sized by
+    context, exactly wrong for an index position -- the shape
+    `mkAxisTransportLayer.v`'s own `D_OUT[1]`/`D_OUT[0]` bit-selects reach
+    (the thirteen-file corpus has no plain-vector bit-select with a
+    constant index at all, so this path was unexercised before it). A
+    constant index renders as a bare decimal integer; a non-constant index
+    falls back to the same `to_integer(unsigned(...))` conversion the
+    memory-element path above already uses, so a future non-constant
+    plain-vector bit-select does not repeat this same defect.
+    """
+    if isinstance(ptr_node, vast.IntConst):
+        return str(_width.parse_int_literal(ptr_node.value))
+    index_text = render_expression(ptr_node, ctx, target_width=None)
+    return f"to_integer(unsigned({index_text}))"

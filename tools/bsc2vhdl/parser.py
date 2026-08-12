@@ -301,12 +301,18 @@ def _render_localparam_condition(node, path) -> str:
 
 def _check_always_sensitivity(always_node, path) -> None:
     """Refuse an `always` block whose sensitivity list is not a single
-    `posedge` on one signal.
+    `posedge` (a clocked process) or a single `level` item on one signal (a
+    combinational process, BSC's own idiom for a multiplexer with no
+    ordinary continuous-assign shape -- `mkAxisTransportLayer.v`'s sole
+    `always@(one_signal) case (...) ...` block takes this form).
 
-    The emitter's process shape (`process (CLK) is ... if rising_edge(CLK)
-    then ...`) is single-clock, edge-triggered by construction; a mixed
-    edge/level list, more than one sensitivity item, or any edge other
-    than `posedge` has no VHDL translation this emitter can produce.
+    The emitter's clocked process shape (`process (CLK) is ... if
+    rising_edge(CLK) then ...`) is single-clock, edge-triggered by
+    construction; a combinational process has no such wrapper at all
+    (`emit.py`'s `_render_process` branches on this same `sens.type`). A
+    mixed edge/level list, more than one sensitivity item, or any edge
+    other than `posedge`/`level` has no VHDL translation either shape can
+    produce.
     """
     sens_items = always_node.sens_list.list
     if len(sens_items) != 1:
@@ -314,7 +320,7 @@ def _check_always_sensitivity(always_node, path) -> None:
             "always block with more than one sensitivity item", path, getattr(always_node, "lineno", 0)
         )
     sens = sens_items[0]
-    if sens.type != "posedge":
+    if sens.type not in ("posedge", "level"):
         raise UnsupportedConstruct(
             f"always block sensitivity edge {sens.type!r}", path, getattr(always_node, "lineno", 0)
         )
