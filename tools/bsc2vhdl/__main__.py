@@ -18,6 +18,7 @@ import tempfile
 from pathlib import Path
 
 from . import __version__
+from . import instantiate as _instantiate
 from .emit import emit_vhdl
 from .errors import UnsupportedConstruct
 from .mangle import NameMap
@@ -61,10 +62,18 @@ def _process_one(input_path: Path, out_dir: Path) -> None:
     namemap_payload = {}
     for signal in module_ir.signals:
         namemap_payload[signal.name] = name_map.signal(signal.name)
+    namemap_payload.update(_instantiate.dropped_parameter_overrides(module_ir))
     namemap_text = json.dumps(dict(sorted(namemap_payload.items())), indent=2) + "\n"
 
-    vhdl_path = _resolve_output_path(out_dir, f"{module_ir.name}.vhd")
-    namemap_path = _resolve_output_path(out_dir, f"{module_ir.name}.namemap.json")
+    # The output name follows the *input file's* own stem, never the
+    # module name declared inside it: `mkAxisTransportLayer.v` contains a
+    # module named `mkAxiSTransportLayer` (capital S), and the next phase
+    # expects the output at `mkAxisTransportLayer.vhd`. This is a no-op for
+    # every one of the thirteen vendored blue-lib files, where the stem and
+    # the module name are identical.
+    stem = input_path.stem
+    vhdl_path = _resolve_output_path(out_dir, f"{stem}.vhd")
+    namemap_path = _resolve_output_path(out_dir, f"{stem}.namemap.json")
 
     _atomic_write(vhdl_path, vhdl_text)
     _atomic_write(namemap_path, namemap_text)

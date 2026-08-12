@@ -310,6 +310,20 @@ def _render_declarations(module_ir, ctx) -> tuple[list[str], set[str]]:
         lines.extend(helper_lines)
         lines.append("")
     lines.extend(declaration_lines)
+
+    # A VHDL `component` declaration is a declarative item: it must appear
+    # in the architecture's own declarative part, before `begin`, never
+    # among its concurrent statements (confirmed directly against GHDL --
+    # `-a` on a `component ... end component;` placed after `begin` fails
+    # with "unexpected token 'is' in a concurrent statement list"). No file
+    # in the thirteen-file corpus this emitter previously closed against
+    # instantiates anything at all, so this call was dead code -- always
+    # returning `[]` -- until the first file that actually does.
+    component_lines = _instantiate.component_declarations(module_ir, ctx)
+    if component_lines:
+        if lines:
+            lines.append("")
+        lines.extend(component_lines)
     return lines, used_helpers
 
 
@@ -384,9 +398,13 @@ def _render_declared_bound_node(node, ctx) -> str:
 def _render_body(module_ir, ctx, used_helpers) -> list[str]:
     groups: list[list[str]] = []
 
-    component_lines = _instantiate.component_declarations(module_ir, ctx)
-    if component_lines:
-        groups.append(component_lines)
+    # The plain (non-`entity`-prefixed) instantiation statements themselves
+    # are concurrent statements and belong here, after `begin`; their
+    # matching `component` declarations belong in the declarative part
+    # instead (see `_render_declarations`), never here.
+    instantiation_lines = _instantiate.instantiations(module_ir, ctx)
+    if instantiation_lines:
+        groups.append(instantiation_lines)
 
     assign_lines = [_render_assign(assign, ctx) for assign in module_ir.assigns]
     if assign_lines:

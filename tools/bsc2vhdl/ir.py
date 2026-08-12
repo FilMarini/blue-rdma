@@ -44,6 +44,43 @@ class SignalDecl:
 
 
 @dataclass(frozen=True)
+class InstanceParam:
+    """One parameter override at an instantiation site (`.width(32'd170)`).
+
+    `value` is the override's own resolved integer, read once by
+    `parser.py` the same way a `Parameter` declaration's own default is
+    resolved; nothing downstream re-parses `value_expr`."""
+
+    name: str
+    value_expr: str
+    value: int
+
+
+@dataclass(frozen=True)
+class InstancePort:
+    """One port association at an instantiation site. `actual_expr` is the
+    connected signal's plain Verilog name, or `None` for the Verilog
+    `.portname()` open-port idiom (`mkAxisTransportLayer.v`'s two
+    unconnected `mkTransportLayer` outputs)."""
+
+    name: str
+    actual_expr: str | None
+
+
+@dataclass(frozen=True)
+class InstanceDecl:
+    """One module instantiation. `module` is the referenced module's own
+    name, never renamed; `name` is this instance's own label, used verbatim
+    as the VHDL instantiation label since it already carries embedded
+    uppercase letters (BSC's own naming) and needs no mangling."""
+
+    module: str
+    name: str
+    params: tuple[InstanceParam, ...]
+    ports: tuple[InstancePort, ...]
+
+
+@dataclass(frozen=True)
 class LocalparamDecl:
     """A Verilog `localparam`: a derived elaboration-time value, never
     exposed as a generic. `value_expr` is already-final VHDL text (bare

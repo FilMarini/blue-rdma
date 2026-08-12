@@ -36,6 +36,19 @@ silently swallowed by it. A localparam's value is rendered once, here, to
 final VHDL text (generic names already substituted): unlike a width bound,
 a localparam's value is never re-interpreted per use site, so there is
 nothing for `width.py` to do with it downstream.
+
+A top-level `InstanceList` (a module instantiation) is collected into
+`ModuleIR.instances` as one `InstanceDecl` per instance. Every parameter
+override must be a plain `IntConst` and every port association must be
+either a plain `Identifier` or the Verilog `.portname()` open-port idiom
+(`argname is None`, `mkAxisTransportLayer.v`'s two unconnected
+`mkTransportLayer` outputs); anything else -- a part-select or an
+expression as an actual -- is outside what `instantiate.py`'s naming rule
+can derive a signature from and is refused by name, matching every other
+refusal in this package. This is the one node class the tracer's own
+top-level item loop never recognized at all: no file in the thirteen-file
+blue-lib corpus instantiates anything, so nothing exercised this path
+before the file that actually does (`mkAxisTransportLayer.v`).
 """
 from __future__ import annotations
 
@@ -48,7 +61,7 @@ from pyverilog.vparser.parser import parse as _pyverilog_parse
 from . import strip as _strip
 from . import width as _width
 from .errors import UnsupportedConstruct
-from .ir import LocalparamDecl, ModuleIR, ParamDecl, PortDecl, SignalDecl
+from .ir import InstanceDecl, InstanceParam, InstancePort, LocalparamDecl, ModuleIR, ParamDecl, PortDecl, SignalDecl
 
 _BINOP_TEXT = {
     vast.Plus: "+",
@@ -90,6 +103,7 @@ def parse_module(path: Path) -> ModuleIR:
     always_blocks: list = []
     initials: list = []
     assigns: list = []
+    instances: list = []
 
     for item in module_def.items:
         if isinstance(item, vast.Decl):
@@ -100,6 +114,8 @@ def parse_module(path: Path) -> ModuleIR:
             always_blocks.append(item)
         elif isinstance(item, vast.Assign):
             assigns.append(item)
+        elif isinstance(item, vast.InstanceList):
+            instances.extend(_handle_instance_list(item, path))
         elif _strip.is_simulation_only(item):
             initials.append(item)
         else:
@@ -128,7 +144,40 @@ def parse_module(path: Path) -> ModuleIR:
         assigns=tuple(assigns),
         always_blocks=tuple(always_blocks),
         initials=tuple(initials),
+        instances=tuple(instances),
     )
+
+
+def _handle_instance_list(item, path) -> list[InstanceDecl]:
+    result: list[InstanceDecl] = []
+    for inst in item.instances:
+        params: list[InstanceParam] = []
+        for parg in inst.parameterlist:
+            value_node = parg.argname
+            if not isinstance(value_node, vast.IntConst):
+                raise UnsupportedConstruct(
+                    "non-constant instance parameter override", path, getattr(inst, "lineno", 0)
+                )
+            params.append(
+                InstanceParam(
+                    name=parg.paramname,
+                    value_expr=value_node.value,
+                    value=_width.parse_int_literal(value_node.value),
+                )
+            )
+        ports: list[InstancePort] = []
+        for parg in inst.portlist:
+            actual = parg.argname
+            if actual is None:
+                ports.append(InstancePort(name=parg.portname, actual_expr=None))
+            elif isinstance(actual, vast.Identifier):
+                ports.append(InstancePort(name=parg.portname, actual_expr=actual.name))
+            else:
+                raise UnsupportedConstruct(
+                    "non-identifier instance port connection", path, getattr(inst, "lineno", 0)
+                )
+        result.append(InstanceDecl(module=inst.module, name=inst.name, params=tuple(params), ports=tuple(ports)))
+    return result
 
 
 def _handle_decl(decl, path, params, localparams, port_directions, port_widths, signals, assigns) -> None:
