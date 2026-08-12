@@ -81,6 +81,7 @@ class _EmitContext:
     param_names: set
     localparam_name: dict = field(default_factory=dict)
     memory_names: set = field(default_factory=set)
+    shared_memory_names: set = field(default_factory=set)
     signal_size: dict = field(default_factory=dict)
 
     def is_param(self, name: str) -> bool:
@@ -88,6 +89,9 @@ class _EmitContext:
 
     def is_memory(self, name: str) -> bool:
         return name in self.memory_names
+
+    def is_shared_memory(self, name: str) -> bool:
+        return name in self.shared_memory_names
 
     def name_for(self, name: str) -> str:
         localparam = self.localparam_name.get(name.lower())
@@ -102,6 +106,36 @@ class _EmitContext:
         return self.signal_size.get(name)
 
 
+def _memories_with_multiple_writers(module_ir) -> set:
+    """Memory names written from more than one surviving `always` block.
+
+    A VHDL signal has one driver per process: two independent clocked
+    processes each writing an element of the same memory array (BRAM2.v's
+    two independent write ports, one per clock domain) is a genuine
+    multiple-driver conflict on a signal. `std_logic`/`std_logic_vector`
+    resolution silently turns that into 'X' on every element one process
+    has written and the other has not, rather than raising an elaboration
+    error -- caught by replaying Phase 2's own committed goldens against
+    the transpiled fixture, not by inspection of the emitted text. A
+    `shared variable`, the same modeling choice the hand-written
+    BRAM2.vhd makes for the identical reason (see its own header), has no
+    such conflict: an assignment to it takes effect immediately, with no
+    driver to resolve. A memory written from at most one process
+    (SizedFIFO.v's `arr`) stays a plain signal, since a signal with a
+    single driver has nothing to resolve either.
+    """
+    memory_names = {signal.name for signal in module_ir.signals if signal.is_memory}
+    if not memory_names:
+        return set()
+    kept_always_blocks, _dropped = _strip.partition_always_blocks(module_ir)
+    writer_counts: dict = {name: 0 for name in memory_names}
+    for always_block in kept_always_blocks:
+        targets = _strip._assignment_targets(always_block.statement)
+        for name in targets & memory_names:
+            writer_counts[name] += 1
+    return {name for name, count in writer_counts.items() if count > 1}
+
+
 def emit_vhdl(module_ir, tool_version: str = "0.1.0") -> str:
     name_map = NameMap.build(module_ir)
     generic_name = {
@@ -112,6 +146,7 @@ def emit_vhdl(module_ir, tool_version: str = "0.1.0") -> str:
     param_kind = {param.name: _param_kind(param.name, module_ir) for param in module_ir.params}
     localparam_name = {localparam.name.lower(): f"{localparam.name.upper()}_C" for localparam in module_ir.localparams}
     memory_names = {signal.name for signal in module_ir.signals if signal.is_memory}
+    shared_memory_names = _memories_with_multiple_writers(module_ir)
 
     ctx = _EmitContext(
         path=module_ir.source_path,
@@ -121,6 +156,7 @@ def emit_vhdl(module_ir, tool_version: str = "0.1.0") -> str:
         param_names={param.name for param in module_ir.params},
         localparam_name=localparam_name,
         memory_names=memory_names,
+        shared_memory_names=shared_memory_names,
     )
     # Every port and signal gets an entry, scalar ones included: a scalar
     # assignment target's own width is "1", the same convention
@@ -301,7 +337,8 @@ def _render_memory_declaration(signal, module_ir, ctx, used_helpers: set[str]) -
         used_helpers.add("bsvAltInit")
     lines = [f"{INDENT}type {type_name} is array ({low} to {high}) of {element_type};"]
     suffix = f" := (others => {default})" if default is not None else ""
-    lines.append(f"{INDENT}signal {vhdl_name} : {type_name}{suffix};")
+    kind = "shared variable" if ctx.is_shared_memory(signal.name) else "signal"
+    lines.append(f"{INDENT}{kind} {vhdl_name} : {type_name}{suffix};")
     return lines
 
 

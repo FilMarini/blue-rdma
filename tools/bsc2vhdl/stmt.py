@@ -111,4 +111,12 @@ def _render_memory_write(pointer_node: vast.Pointer, rhs, ctx, pad: str) -> list
     target = f"{base}(to_integer(unsigned({index_text})))"
     target_width = ctx.target_width_for(base_name)
     value = _expr.render_expression(rhs, ctx, target_width=target_width)
-    return [f"{pad}{target} <= {value};"]
+    # A memory written from more than one process is emitted as a shared
+    # variable, not a signal (see emit.py's _memories_with_multiple_writers):
+    # two processes each driving one signal is a multiple-driver conflict
+    # that resolves to 'X' wherever the two drivers' views of an element
+    # disagree, while an assignment to a shared variable takes effect
+    # immediately with nothing to resolve. The operator is the only
+    # difference: `:=` for a variable, `<=` for a signal.
+    operator = ":=" if ctx.is_shared_memory(base_name) else "<="
+    return [f"{pad}{target} {operator} {value};"]
