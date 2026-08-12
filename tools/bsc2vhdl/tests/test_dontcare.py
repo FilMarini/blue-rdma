@@ -82,3 +82,21 @@ def test_parse_sized_literal_resolves_a_synthetic_x_style_literal_through_the_sa
     assert result.width == 8
     assert result.care_mask == 0b00001111
     assert result.value == 0b00001010
+
+
+def test_parse_sized_literal_zero_extends_an_underspecified_binary_literal() -> None:
+    # mkTransportLayer.v's own `2'b0` case-arm literal: one digit for a
+    # two-bit declared width. Verilog zero-extends the missing high bit with
+    # a defined 0, never a don't-care, so the arm must read as fully cared
+    # (care_mask == full_mask) rather than being misclassified as a casez
+    # wildcard.
+    result = parse_sized_literal("2'b0")
+    assert result == SizedLiteral(width=2, value=0, care_mask=0b11)
+
+
+def test_parse_sized_literal_zero_extends_a_partial_binary_literal_above_its_lowest_bit() -> None:
+    # A digit count between 1 and the full declared width: the given digits
+    # stay right-aligned to the least-significant bit, and only the
+    # remaining, unwritten high bits are zero-extended.
+    result = parse_sized_literal("5'b01")
+    assert result == SizedLiteral(width=5, value=0b00001, care_mask=0b11111)

@@ -38,12 +38,18 @@ def parse_sized_literal(text: str) -> SizedLiteral:
 
     Splits on the apostrophe, reads the optional width before it and the
     base character after it (`b`/`o`/`d`/`h`, case-insensitive), then walks
-    the digits most-significant first. `?`, `x`, `X`, `z`, and `Z` are
-    treated as don't-care over that digit's whole bit group: they clear the
-    corresponding `care_mask` bits and leave the matching `value` bits at 0.
-    Underscores in the digit string are ignored, as in Verilog. Raises
-    `ValueError` naming the offending text on a malformed literal or an
-    unrecognized base.
+    the digits least-significant first (right-aligned to the literal's own
+    declared width, the same alignment Verilog itself uses). `?`, `x`, `X`,
+    `z`, and `Z` are treated as don't-care over that digit's whole bit
+    group: they clear the corresponding `care_mask` bits and leave the
+    matching `value` bits at 0. Any width beyond what the given digits cover
+    (fewer digits than the declared width implies) is zero-extended with
+    defined 0 bits instead, exactly as Verilog itself zero-extends an
+    underspecified sized literal -- only an explicit don't-care digit in the
+    literal's own text ever produces an undefined bit, never an implicit
+    missing leading digit. Underscores in the digit string are ignored, as
+    in Verilog. Raises `ValueError` naming the offending text on a malformed
+    literal or an unrecognized base.
     """
     original = text
     text = text.strip()
@@ -71,17 +77,28 @@ def parse_sized_literal(text: str) -> SizedLiteral:
     step = _BITS_PER_DIGIT[base]
     value = 0
     care_mask = 0
-    bit_pos = width
-    for ch in digits:
-        bit_pos -= step
-        if ch in _UNCARED_CHARS:
-            continue
-        try:
-            digit_value = int(ch, base)
-        except ValueError as exc:
-            raise ValueError(f"malformed sized literal {original!r}: bad digit {ch!r}") from exc
-        value |= digit_value << bit_pos
-        care_mask |= ((1 << step) - 1) << bit_pos
+    bit_pos = 0
+    for ch in reversed(digits):
+        if ch not in _UNCARED_CHARS:
+            try:
+                digit_value = int(ch, base)
+            except ValueError as exc:
+                raise ValueError(f"malformed sized literal {original!r}: bad digit {ch!r}") from exc
+            value |= digit_value << bit_pos
+            care_mask |= ((1 << step) - 1) << bit_pos
+        bit_pos += step
+
+    # Verilog zero-extends an underspecified binary/octal/hex literal (fewer
+    # digits than its declared width implies, e.g. `2'b0` == `2'b00`) on its
+    # most-significant side with defined 0 bits, never a don't-care: only an
+    # explicit `?`/`x`/`z` digit in the literal's own text ever produces an
+    # undefined bit. Without this, `mkTransportLayer.v`'s own `2'b0` case-arm
+    # literal (one digit for a two-bit width) left its unwritten high bit at
+    # care_mask=0, misclassifying an otherwise fully-defined `case` arm as
+    # carrying a wildcard and routing it into the ordered-if/elsif-chain
+    # renderer meant for a genuine `casez` pattern.
+    if bit_pos < width:
+        care_mask |= ((1 << (width - bit_pos)) - 1) << bit_pos
 
     return SizedLiteral(width=width, value=value & full_mask, care_mask=care_mask & full_mask)
 
