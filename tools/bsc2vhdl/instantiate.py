@@ -82,15 +82,103 @@ def component_declarations(module_ir, ctx) -> list[str]:
     return lines
 
 
+def _scalar_bridges(module_ir) -> dict[tuple[str, str], tuple[str, str]]:
+    """Every (instance name, formal port name) whose own actual disagrees
+    with the component's shared signature, mapped to `(direction,
+    bridge_signal_name)`.
+
+    BSC sometimes declares a functionally identical port as a bare scalar
+    wire at one instantiation site and as an explicit range at another
+    (`FIFO2`'s `D_IN`/`D_OUT` are always `slv(WIDTH_G-1 downto 0)` on the
+    real hand-written entity, never scalar, yet a handful of `mkQP.v`
+    instances connect a bare one-bit wire to it). The component's own
+    signature is derived once per (module, port) from whichever instance
+    connects it first (`_port_signature`, the same rule
+    `component_declarations` uses), so a *later* instance whose actual is
+    scalar disagrees with that shared signature.
+
+    Neither direction can bridge the mismatch with a plain type
+    conversion at the association itself: an aggregate actual
+    (`(0 => scalar)`) is a legal `in` association but not an `out` one --
+    VHDL classifies a bare aggregate as an expression, and only `in`
+    accepts an expression actual -- so both directions go through one
+    `slv(0 downto 0)` bridge signal, connected to the formal directly (a
+    plain name, legal either direction) and reconciled with the scalar
+    through one extra concurrent assignment (`_bridge_assignment`) instead.
+    """
+    by_module: dict[str, list] = {}
+    for instance in module_ir.instances:
+        by_module.setdefault(instance.module, []).append(instance)
+    driven_names = _driven_names(module_ir)
+
+    vector_ports: set[tuple[str, str]] = set()
+    for module_name, instances in by_module.items():
+        seen_ports: set[str] = set()
+        for instance in instances:
+            for port in instance.ports:
+                if port.name in seen_ports:
+                    continue
+                seen_ports.add(port.name)
+                used_as_width: set[str] = set()
+                _direction, type_text = _port_signature(port.name, instances, module_ir, driven_names, used_as_width)
+                if type_text != "sl":
+                    vector_ports.add((module_name, port.name))
+
+    bridges: dict[tuple[str, str], tuple[str, str]] = {}
+    for instance in module_ir.instances:
+        for port in instance.ports:
+            if port.actual_expr is None:
+                continue
+            if (instance.module, port.name) not in vector_ports:
+                continue
+            is_scalar, _msb, _lsb = _actual_shape(port.actual_expr, module_ir)
+            if not is_scalar:
+                continue
+            direction = "in" if port.actual_expr in driven_names else "out"
+            bridge_name = f"{instance.name}{port.name}Bridge"
+            bridges[(instance.name, port.name)] = (direction, bridge_name)
+    return bridges
+
+
+def bridge_signal_declarations(module_ir) -> list[str]:
+    """One `slv(0 downto 0)` declaration per `_scalar_bridges` entry, for
+    the architecture's declarative part."""
+    bridges = _scalar_bridges(module_ir)
+    return [f"{INDENT}signal {bridge_name} : slv(0 downto 0);" for _direction, bridge_name in bridges.values()]
+
+
+def bridge_assignments(module_ir, ctx) -> list[str]:
+    """One concurrent assignment per `_scalar_bridges` entry, reconciling
+    the bridge signal with the scalar actual it stands in for: the scalar
+    drives bit 0 of the bridge on `in`, and reads bit 0 of the bridge on
+    `out`."""
+    bridges = _scalar_bridges(module_ir)
+    lines: list[str] = []
+    for instance in module_ir.instances:
+        for port in instance.ports:
+            key = (instance.name, port.name)
+            if key not in bridges:
+                continue
+            direction, bridge_name = bridges[key]
+            actual_text = ctx.name_for(port.actual_expr)
+            if direction == "in":
+                lines.append(f"{INDENT}{bridge_name} <= (0 => {actual_text});")
+            else:
+                lines.append(f"{INDENT}{actual_text} <= {bridge_name}(0);")
+    return lines
+
+
 def instantiations(module_ir, ctx) -> list[str]:
     if not module_ir.instances:
         return []
+
+    bridges = _scalar_bridges(module_ir)
 
     lines: list[str] = []
     for index, instance in enumerate(module_ir.instances):
         if index > 0:
             lines.append("")
-        lines.extend(_render_instantiation(instance, ctx))
+        lines.extend(_render_instantiation(instance, ctx, bridges))
     return lines
 
 
@@ -168,7 +256,11 @@ def _port_signature(
         # Left unconnected in every instantiation of this module: BSC only
         # ever leaves a method *result* unconnected, never an input, so
         # this defaults to a scalar `out`. See the module docstring's
-        # accepted-risk note.
+        # accepted-risk note. `_render_component` may override this default
+        # afterward, from an A/B-paired sibling port that *is* connected
+        # (BRAM2's `DOA`, left open at mkQP.v:7592 because the generated
+        # core only ever reads `DOB`, is the corpus's first port this
+        # matters for).
         return "out", "sl"
 
     actual_name = connected.actual_expr
@@ -188,6 +280,26 @@ def _port_signature(
     return direction, f"slv({msb_expr} downto {lsb_expr})"
 
 
+def _has_connected_actual(port_name: str, instances: list) -> bool:
+    return any(
+        port.name == port_name and port.actual_expr is not None
+        for instance in instances
+        for port in instance.ports
+    )
+
+
+def _paired_sibling_name(port_name: str) -> str | None:
+    """The A/B-paired counterpart of a dual-port-memory-shaped port name
+    (`DOA`<->`DOB`, `ADDRA`<->`ADDRB`, `ENA`<->`ENB`, ...), or `None` if
+    `port_name` does not end in a bare `A`/`B` suffix at all. Every one of
+    BRAM2's own eight ports follows this convention."""
+    if port_name.endswith("A"):
+        return f"{port_name[:-1]}B"
+    if port_name.endswith("B"):
+        return f"{port_name[:-1]}A"
+    return None
+
+
 def _render_component(module_name: str, instances: list, module_ir, driven_names: set[str]) -> list[str]:
     used_as_width: set[str] = set()
 
@@ -199,10 +311,37 @@ def _render_component(module_name: str, instances: list, module_ir, driven_names
                 seen_ports.add(port.name)
                 port_names.append(port.name)
 
-    port_entries = [
-        (port_name, *_port_signature(port_name, instances, module_ir, driven_names, used_as_width))
+    signatures: dict[str, tuple[str, str]] = {
+        port_name: _port_signature(port_name, instances, module_ir, driven_names, used_as_width)
         for port_name in port_names
-    ]
+    }
+
+    # A port left unconnected on every instance of this module (the
+    # `connected is None` fallback inside `_port_signature`, always
+    # `("out", "sl")`) is only correct when the real entity actually is
+    # scalar there. When an A/B-paired sibling port name *is* connected and
+    # resolved to a non-scalar shape, that shape almost certainly applies
+    # here too (a dual-port memory's two data, address, or enable ports
+    # share the same width by construction), and a scalar default would
+    # otherwise surface only as a GHDL elaboration-time port-binding
+    # mismatch against the real hand-written entity, never inside this
+    # transpiler (see the module docstring's accepted-risk note). This is
+    # still derived entirely from the instantiation site -- the sibling's
+    # own shape came from a connected actual elsewhere in this same file --
+    # never from reading a `.vhd` file or a manifest.
+    for port_name in port_names:
+        direction, type_text = signatures[port_name]
+        if type_text != "sl" or _has_connected_actual(port_name, instances):
+            continue
+        sibling_name = _paired_sibling_name(port_name)
+        if sibling_name is None or sibling_name not in signatures:
+            continue
+        sibling_direction, sibling_type = signatures[sibling_name]
+        if sibling_type == "sl" or sibling_direction != direction:
+            continue
+        signatures[port_name] = (direction, sibling_type)
+
+    port_entries = [(port_name, *signatures[port_name]) for port_name in port_names]
 
     param_names: list[str] = []
     seen_params: set[str] = set()
@@ -224,11 +363,16 @@ def _render_component(module_name: str, instances: list, module_ir, driven_names
 def _render_component_generic_clause(param_names: list[str], used_as_width: set[str]) -> list[str]:
     entries = [(f"{name.upper()}_G", "positive" if name in used_as_width else "natural") for name in param_names]
     max_name = max(len(name) for name, _ in entries)
-    max_kind = max(len(kind) for _, kind in entries)
     lines = [f"{INDENT * 2}generic ("]
     for index, (name, kind) in enumerate(entries):
         terminator = ");" if index == len(entries) - 1 else ";"
-        lines.append(f"{INDENT * 3}{name.ljust(max_name + 1)}: {kind.ljust(max_kind)}{terminator}")
+        # `kind` is never left-padded: it is the last token on the line
+        # before `terminator`, exactly like `type_text` in
+        # `_render_component_port_clause` below, so a mixed
+        # `natural`/`positive` group (BRAM2's own four generics, the first
+        # component in the corpus to need more than one) never leaves a
+        # trailing space before `;`/`);`.
+        lines.append(f"{INDENT * 3}{name.ljust(max_name + 1)}: {kind}{terminator}")
     return lines
 
 
@@ -242,10 +386,10 @@ def _render_component_port_clause(port_entries: list) -> list[str]:
     return lines
 
 
-def _render_instantiation(instance, ctx) -> list[str]:
+def _render_instantiation(instance, ctx, bridges) -> list[str]:
     lines = [f"{INDENT}{instance.name} : {instance.module}"]
     lines.extend(_render_generic_map(instance))
-    lines.extend(_render_port_map(instance, ctx))
+    lines.extend(_render_port_map(instance, ctx, bridges))
     return lines
 
 
@@ -265,11 +409,24 @@ def _render_generic_map(instance) -> list[str]:
     return lines
 
 
-def _render_port_map(instance, ctx) -> list[str]:
-    entries = [
-        (port.name, "open" if port.actual_expr is None else ctx.name_for(port.actual_expr))
-        for port in instance.ports
-    ]
+def _render_port_map(instance, ctx, bridges) -> list[str]:
+    entries = []
+    for port in instance.ports:
+        if port.actual_expr is None:
+            entries.append((port.name, "open"))
+            continue
+        key = (instance.name, port.name)
+        if key in bridges:
+            # This instance's own actual is a bare scalar wire, but the
+            # component's shared signature (derived from a *different*
+            # instance's vector-shaped actual) declares this formal as
+            # `slv(...)`. The formal connects to the dedicated bridge
+            # signal (a plain name, legal for either direction) instead of
+            # the scalar directly; `bridge_assignments` reconciles the two.
+            _direction, bridge_name = bridges[key]
+            entries.append((port.name, bridge_name))
+            continue
+        entries.append((port.name, ctx.name_for(port.actual_expr)))
     max_name = max(len(name) for name, _ in entries)
     lines = [f"{INDENT * 2}port map ("]
     for index, (name, actual) in enumerate(entries):
