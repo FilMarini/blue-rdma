@@ -107,7 +107,7 @@ def _render_memory_write(pointer_node: vast.Pointer, rhs, ctx, pad: str) -> list
         )
     base_name = base_var.name
     base = ctx.name_for(base_name)
-    index_text = _expr.render_expression(pointer_node.ptr, ctx, target_width=None)
+    index_text = _expr._qualify_for_cast(pointer_node.ptr, _expr.render_expression(pointer_node.ptr, ctx, target_width=None))
     target = f"{base}(to_integer(unsigned({index_text})))"
     target_width = ctx.target_width_for(base_name)
     value = _expr.render_expression(rhs, ctx, target_width=target_width)

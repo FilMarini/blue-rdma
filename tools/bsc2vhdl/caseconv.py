@@ -91,25 +91,70 @@ def _whole_selector_condition(comp_node, literal, ctx) -> str:
     return f'{selector_text} = "{bits}"'
 
 
-def _pattern_condition(comp_node, pattern_text: str, ctx) -> str:
-    literal = parse_sized_literal(pattern_text)
-    full_mask = (1 << literal.width) - 1
-    if literal.care_mask == full_mask:
-        return _whole_selector_condition(comp_node, literal, ctx)
-    terms = []
-    for bit_index in range(literal.width - 1, -1, -1):
-        if not (literal.care_mask >> bit_index) & 1:
-            continue
-        expected_bit = (literal.value >> bit_index) & 1
-        terms.append(_bit_condition(comp_node, bit_index, expected_bit, ctx))
-    return " and ".join(terms)
+def _pattern_condition(comp_node, pattern, ctx) -> str:
+    if isinstance(pattern, vast.Identifier) and _is_constant_name(pattern.name, ctx):
+        return _named_constant_condition(comp_node, pattern, ctx)
+    if isinstance(pattern, vast.IntConst):
+        literal = parse_sized_literal(pattern.value)
+        full_mask = (1 << literal.width) - 1
+        if literal.care_mask == full_mask:
+            return _whole_selector_condition(comp_node, literal, ctx)
+        terms = []
+        for bit_index in range(literal.width - 1, -1, -1):
+            if not (literal.care_mask >> bit_index) & 1:
+                continue
+            expected_bit = (literal.value >> bit_index) & 1
+            terms.append(_bit_condition(comp_node, bit_index, expected_bit, ctx))
+        return " and ".join(terms)
+    # A `case (1'b1) // synopsys parallel_case` priority-mux idiom: the
+    # selector is a bare boolean constant and each arm's own "pattern" is
+    # itself a boolean condition instead of a value to match against --
+    # a bare signal reference (`WILL_FIRE_RL_...`), or an `Lor` (`||`) of
+    # several -- that must equal '1' for the arm to fire. Rendered through
+    # the general expression renderer exactly like any other boolean
+    # subexpression (`_render_logical_binary` already handles `Lor`), then
+    # compared to '1' directly rather than through `toSlv`, since neither
+    # shape names a declared constant.
+    pattern_text = _expr.render_expression(pattern, ctx, target_width=None)
+    return f"{pattern_text} = '1'"
+
+
+def _is_constant_name(name: str, ctx) -> bool:
+    return ctx.is_param(name) or ctx.localparam_name.get(name.lower()) is not None
+
+
+def _named_constant_condition(comp_node, pattern: vast.Identifier, ctx) -> str:
+    """A case-arm label that names a `parameter`/`localparam` rather than a
+    bare sized literal (`mkQP.v`'s and `mkTransportLayer.v`'s enumerated
+    state-machine `case`/`casez` statements both use this). Every
+    `localparam` is emitted as a `natural` constant and every "natural"-kind
+    generic parameter is a plain VHDL generic
+    (`emit.py::_render_declarations`, `NameMap`), so the named pattern needs
+    the same `toSlv(name, width)` elaboration-time conversion
+    `emit.py::_render_assign_value` already applies to a "natural"-kind
+    reference in a vector context. There is no `care_mask` concept for a
+    named constant, so this always compares the whole selector.
+    `_expr.render_expression(pattern, ctx, target_width=None)` -- the
+    self-determined form, with no `_fit` wrapper applied -- renders the
+    bare name whether `pattern` turns out to be a generic or a localparam,
+    so this needs no separate `ctx.is_param`/`ctx.name_for` dispatch of its
+    own. `target_width=None` matters here beyond style: `width.infer_width`
+    does not yet know a localparam's own declared width (it defaults to 1),
+    so letting `render_expression` apply its own `_fit` against a wider
+    target would wrap a `natural` constant in `resize(...)`, a call with no
+    matching overload.
+    """
+    selector_text = _expr.render_expression(comp_node, ctx, target_width=None)
+    selector_width = _width.infer_width(comp_node, ctx)
+    name_text = _expr.render_expression(pattern, ctx, target_width=None)
+    return f"{selector_text} = toSlv({name_text}, {selector_width.text})"
 
 
 def _arm_condition(comp_node, arm, ctx) -> str | None:
     patterns = arm.cond
     if not patterns:
         return None
-    parts = [_pattern_condition(comp_node, pattern.value, ctx) for pattern in patterns]
+    parts = [_pattern_condition(comp_node, pattern, ctx) for pattern in patterns]
     if len(parts) == 1:
         return parts[0]
     return " or ".join(f"({part})" for part in parts)

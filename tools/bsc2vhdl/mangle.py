@@ -8,7 +8,11 @@ The rename transform, locked here: split the original name on underscore,
 drop empty tokens, lowercase the first token entirely, capitalize each
 later token's first character and lowercase the rest of that token, then
 join with no separator. `not_ring_full` becomes `notRingFull`, `data0_reg`
-becomes `data0Reg`, and the internal register `Q_OUT` becomes `qOut`.
+becomes `data0Reg`, and the internal register `Q_OUT` becomes `qOut`. If
+that join starts with a digit (BSC's own `_1_SL_...`/`_2_...`-prefixed
+temporaries, `mkQP.v`'s `_1_SL_IF_payloadGenerator4SQ_...` among them), a
+literal `n` is prepended, since a VHDL basic identifier cannot start with a
+digit at all.
 
 Ports are reserved in the namespace before any internal name is placed, and
 all collision detection is case-insensitive because VHDL identifiers are.
@@ -49,7 +53,19 @@ def _camel_case(name: str) -> str:
     parts = [first.lower()]
     for token in rest:
         parts.append(token[0].upper() + token[1:].lower())
-    return "".join(parts)
+    result = "".join(parts)
+    if result[0].isdigit():
+        # A VHDL basic identifier must start with a letter. BSC's own
+        # leading-digit temporaries (`mkQP.v`'s
+        # `_1_SL_IF_payloadGenerator4SQ_payloadGenReqQ_fir_ETC___d577`)
+        # split-and-lowercase to a bare leading digit under the rule
+        # above. `n` (mnemonic for "numeric-leading") is prepended
+        # unconditionally rather than only on a later collision, so the
+        # transform stays a pure function of the name text alone; a
+        # collision this introduces is still caught by `NameMap.build`'s
+        # own group-based disambiguation, the same as any other name.
+        result = f"n{result}"
+    return result
 
 
 def _collision_suffix(original: str) -> str:
