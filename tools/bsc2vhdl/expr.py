@@ -310,6 +310,30 @@ def _render_arith_chain(node, ctx, target_width: str | None) -> str:
     return f"slv({' '.join(pieces)})"
 
 
+# to_integer(unsigned(x)) converts through a NATURAL accumulator
+# (numeric_std-body.vhdl's own TO_INTEGER doubles a running total once per
+# bit of x, most-significant first) that overflows with a runtime "bound
+# check failure" the instant x's own bit width is wide enough for that
+# doubling to exceed what NATURAL can hold, regardless of whether x's real
+# value is small: mkTransportLayer.v's own 513-bit register
+# headerInvalidFragBitNumReg is shifted by directly, with no slicing
+# anywhere in the source Verilog (`<<` handles an oversized shift amount by
+# producing an all-zero result the instant it reaches or exceeds the
+# shifted vector's own width, never by complaining about the amount
+# operand's own declared width). This register's simulation-only
+# alternating power-on pattern is exactly wide enough to overflow NATURAL
+# the moment it reaches this conversion, though a genuinely large *value*
+# (not just a wide *declaration*) would crash identically. A shift-amount
+# operand this wide is, by construction, safely representable as "big
+# enough to shift everything out" whenever any bit above
+# _SHIFT_AMOUNT_SAFE_BITS is set, so only the low _SHIFT_AMOUNT_SAFE_BITS
+# bits (comfortably inside NATURAL's own range) are ever handed to
+# to_integer; the high bits are checked only for exact zero, which
+# numeric_std's unsigned "/=" against a NATURAL literal supports at any
+# width with no risk of its own overflow.
+_SHIFT_AMOUNT_SAFE_BITS = 30
+
+
 def _render_shift(node, ctx, target_width: str | None) -> str:
     """`<<`/`>>` (`vast.Sll`/`vast.Srl`): `ieee.numeric_std.shift_left`/
     `shift_right` on the left operand, by an amount converted to a plain
@@ -320,12 +344,53 @@ def _render_shift(node, ctx, target_width: str | None) -> str:
     rendered at its own self-determined width (`target_width=None`), per
     the same self-determined/context-determined split every other operand
     in this module follows.
+
+    When the shift-amount operand is a bare signal/register reference
+    wider than `_SHIFT_AMOUNT_SAFE_BITS` (see that constant's own
+    docstring), the count is instead a saturating expression: the low
+    `_SHIFT_AMOUNT_SAFE_BITS` bits converted directly, or the shift's own
+    left-operand width (guaranteed to shift everything out, matching
+    Verilog's own saturating `<<`/`>>` semantics) whenever any higher bit is
+    set. A non-identifier shift-amount operand this wide has never been
+    seen in the corpus and is left on the original, unguarded path: VHDL
+    slicing requires a name, not an arbitrary expression, so widening this
+    same fix to cover one would need a different mechanism entirely.
     """
     op_name = _SHIFT_OPS[type(node)]
     self_width = _width.infer_width(node, ctx)
     left = _qualify_for_cast(node.left, render_expression(node.left, ctx, target_width=self_width.text))
-    amount = _qualify_for_cast(node.right, render_expression(node.right, ctx, target_width=None))
-    core = f"slv({op_name}(unsigned({left}), to_integer(unsigned({amount}))))"
+    amount_width = _width.infer_width(node.right, ctx)
+    amount_value = amount_width.value
+    if amount_value is None:
+        # A declared-width identifier's own range is almost always rendered
+        # as symbolic arithmetic text (`emit.py`'s `_width.symbolic_size`
+        # only collapses to a bare digit string for the `[name-1:0]`
+        # generic idiom), so `amount_width.value` is `None` for essentially
+        # every literal, non-generic register range in the corpus --
+        # including `mkTransportLayer.v`'s own 513-bit
+        # headerInvalidFragBitNumReg, this guard's whole reason to exist.
+        # `amount_width.text` for such a register is still every bit as
+        # literal-computable as a bare digit ("(512) - (0) + 1"), so it is
+        # evaluated the same way a part-select's own range bounds already
+        # are (`width._width_of_range`), falling back to `None` only when
+        # the text genuinely names an unresolved generic.
+        try:
+            amount_value = _width.evaluate_width_expr(amount_width.text, {})
+        except ValueError:
+            amount_value = None
+    if (
+        isinstance(node.right, vast.Identifier)
+        and amount_value is not None
+        and amount_value > _SHIFT_AMOUNT_SAFE_BITS
+    ):
+        amount_name = ctx.name_for(node.right.name)
+        high_bits = f"{amount_name}({amount_width.text} - 1 downto {_SHIFT_AMOUNT_SAFE_BITS})"
+        low_bits = f"{amount_name}({_SHIFT_AMOUNT_SAFE_BITS} - 1 downto 0)"
+        amount_count = f"ite(unsigned({high_bits}) /= 0, {self_width.text}, to_integer(unsigned({low_bits})))"
+    else:
+        amount = _qualify_for_cast(node.right, render_expression(node.right, ctx, target_width=None))
+        amount_count = f"to_integer(unsigned({amount}))"
+    core = f"slv({op_name}(unsigned({left}), {amount_count}))"
     return _fit(core, self_width, target_width, node, ctx)
 
 

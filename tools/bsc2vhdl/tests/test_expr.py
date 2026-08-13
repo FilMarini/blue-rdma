@@ -151,6 +151,51 @@ def test_render_expression_partselect_renders_a_downto_slice() -> None:
     assert text == "p2depth2(P3CNTR_WIDTH_G-1 downto 0)"
 
 
+def test_render_expression_narrow_shift_amount_uses_bare_to_integer() -> None:
+    # A shift-amount operand at or under _SHIFT_AMOUNT_SAFE_BITS keeps the
+    # original, unguarded rendering: mkQP.v's own ten shift usages (all a
+    # handful of bits wide) must never see the saturating construct added
+    # for mkTransportLayer.v's own oversized register.
+    ctx = _vector_ctx(WIDE_LHS="32", NARROW_AMOUNT="5")
+    node = vast.Sll(vast.Identifier("WIDE_LHS"), vast.Identifier("NARROW_AMOUNT"))
+    text = render_expression(node, ctx, target_width=None)
+    assert text == "slv(shift_left(unsigned(WIDE_LHS), to_integer(unsigned(NARROW_AMOUNT))))"
+    assert "ite(" not in text
+
+
+def test_render_expression_wide_shift_amount_saturates_instead_of_crashing() -> None:
+    # mkTransportLayer.v's own headerInvalidFragBitNumReg (513 bits, shifted
+    # by directly with no slicing in the source Verilog): a bare to_integer
+    # on the full width overflows NATURAL inside numeric_std's own
+    # TO_INTEGER at GHDL runtime the instant enough high bits are set (the
+    # register's simulation-only alternating power-on pattern reaches this
+    # unconditionally). The saturating form instead checks only the bits
+    # above _SHIFT_AMOUNT_SAFE_BITS for exact zero and falls back to the
+    # shift's own left-operand width (self_width) when any of them are set,
+    # matching Verilog's own all-zero result for an oversized shift amount.
+    ctx = _vector_ctx(WIDE_LHS="32", WIDE_AMOUNT="513")
+    node = vast.Sll(vast.Identifier("WIDE_LHS"), vast.Identifier("WIDE_AMOUNT"))
+    text = render_expression(node, ctx, target_width=None)
+    assert text == (
+        "slv(shift_left(unsigned(WIDE_LHS), "
+        "ite(unsigned(WIDE_AMOUNT(513 - 1 downto 30)) /= 0, 32, "
+        "to_integer(unsigned(WIDE_AMOUNT(30 - 1 downto 0))))))"
+    )
+    assert "bound check" not in text  # documentation only; the real proof is GHDL not crashing
+
+
+def test_render_expression_wide_shift_amount_non_identifier_stays_on_original_path() -> None:
+    # A wide shift-amount operand that is not a bare identifier (never seen
+    # in the corpus) cannot be sliced by name, so it is left on the
+    # original, unguarded to_integer rendering rather than attempting an
+    # unsound transform.
+    ctx = _vector_ctx(WIDE_LHS="32", WIDE_A="257", WIDE_B="257")
+    node = vast.Sll(vast.Identifier("WIDE_LHS"), vast.Plus(vast.Identifier("WIDE_A"), vast.Identifier("WIDE_B")))
+    text = render_expression(node, ctx, target_width=None)
+    assert "ite(" not in text
+    assert "to_integer(unsigned(" in text
+
+
 def test_render_expression_fifo2_masked_or_datapath() -> None:
     module_def = _parse_raw(_VENDOR_DIR / "FIFO2.v")
     assign = _find_nonblocking_assign(module_def, "data0_reg")
