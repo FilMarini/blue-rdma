@@ -60,19 +60,44 @@ def manifest_entry(source_path: Path, output_file: str, output_text: str) -> Man
     )
 
 
+def _entry_payload(entry: ManifestEntry) -> dict:
+    return {
+        "source_path": entry.source_path,
+        "source_sha256": entry.source_sha256,
+        "output_file": entry.output_file,
+        "output_sha256": entry.output_sha256,
+        "transpiler_version": __version__,
+    }
+
+
+def _serialize(entries_by_name: dict) -> str:
+    payload = {"entries": dict(sorted(entries_by_name.items()))}
+    return json.dumps(payload, indent=2) + "\n"
+
+
 def build_manifest(entries: Iterable[ManifestEntry]) -> str:
     """Serialize `entries` into the manifest's deterministic JSON text."""
-    ordered = sorted(entries, key=lambda entry: entry.source_path)
-    payload = {
-        "entries": {
-            entry.source_path: {
-                "source_path": entry.source_path,
-                "source_sha256": entry.source_sha256,
-                "output_file": entry.output_file,
-                "output_sha256": entry.output_sha256,
-                "transpiler_version": __version__,
-            }
-            for entry in ordered
-        }
-    }
-    return json.dumps(payload, indent=2) + "\n"
+    by_name = {entry.source_path: _entry_payload(entry) for entry in entries}
+    return _serialize(by_name)
+
+
+def merge_manifest(existing_entries: dict, entries: Iterable[ManifestEntry]) -> str:
+    """Merge `entries` into `existing_entries` and serialize the result
+    through the same deterministic, sorted-by-name JSON text `build_manifest`
+    produces.
+
+    `existing_entries` is the raw `"entries"` mapping of a previously
+    written manifest (or an empty dict if no manifest exists yet), spanning
+    however many prior invocations wrote it. This invocation's own entries
+    replace or add exactly the keys they name; every other key in
+    `existing_entries` passes through verbatim, including whatever
+    `transpiler_version` it was recorded with, so a manifest spanning two
+    output directories can be produced by two invocations without either one
+    losing the other's entries. This is the one place the merge itself
+    happens, next to `build_manifest`, so `__main__.py` only decides whether
+    to pass in a prior mapping.
+    """
+    merged = dict(existing_entries)
+    for entry in entries:
+        merged[entry.source_path] = _entry_payload(entry)
+    return _serialize(merged)

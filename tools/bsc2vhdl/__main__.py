@@ -17,6 +17,17 @@ machine-readable signal is the printed total line, not the exit status. A
 genuine tool error (an unreadable file, a pyverilog parse failure) still
 propagates and exits nonzero. `--survey` and `--manifest` are mutually
 exclusive: a census produces no outputs to record.
+
+`--manifest-merge` (requires `--manifest`, mutually exclusive with
+`--survey`) reads the manifest already at `--manifest`, if one exists, and
+replaces or adds only the keys this invocation's own inputs produced,
+leaving every other key untouched. Without it, `--manifest` is overwritten
+with only this invocation's entries, exactly as before. `--out-dir` accepts
+only one directory per invocation, so a manifest spanning two output
+directories (a run over one directory, then a second run over another) is
+produced by two invocations, the second with `--manifest-merge`. The
+partial-run refusal holds in both modes: if any input in the invocation
+failed, no manifest is written at all, merged or not.
 """
 from __future__ import annotations
 
@@ -33,7 +44,7 @@ from .emit import emit_vhdl
 from .errors import UnsupportedConstruct
 from .mangle import NameMap
 from .parser import parse_module, survey_module
-from .provenance import ManifestEntry, build_manifest, manifest_entry
+from .provenance import ManifestEntry, build_manifest, manifest_entry, merge_manifest
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -43,6 +54,14 @@ def _build_parser() -> argparse.ArgumentParser:
         "--out-dir", default=None, help="directory to write .vhd and .namemap.json output into"
     )
     parser.add_argument("--manifest", default=None, help="path to write a provenance manifest JSON")
+    parser.add_argument(
+        "--manifest-merge",
+        action="store_true",
+        help=(
+            "merge this invocation's entries into the manifest named by --manifest instead of "
+            "overwriting it: every entry this invocation did not produce is preserved verbatim"
+        ),
+    )
     parser.add_argument(
         "--survey",
         action="store_true",
@@ -118,6 +137,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
 
+    if args.manifest_merge and args.manifest is None:
+        parser.error("--manifest-merge requires --manifest")
+    if args.manifest_merge and args.survey:
+        parser.error("--manifest-merge and --survey cannot be combined: a census produces no entries to merge")
+
     if args.survey:
         if args.manifest is not None:
             parser.error("--survey and --manifest cannot be combined: a census produces no outputs to record")
@@ -143,10 +167,18 @@ def main(argv: list[str] | None = None) -> int:
         if exit_code == 0:
             # A manifest that records a run which partly failed would be
             # worse than no manifest: only write when every input in this
-            # invocation succeeded.
+            # invocation succeeded. This guarantee holds in both modes below.
             manifest_path = Path(args.manifest)
             manifest_path.parent.mkdir(parents=True, exist_ok=True)
-            _atomic_write(manifest_path, build_manifest(entries))
+            if args.manifest_merge:
+                try:
+                    existing_entries = json.loads(manifest_path.read_text())["entries"]
+                except FileNotFoundError:
+                    existing_entries = {}
+                manifest_text = merge_manifest(existing_entries, entries)
+            else:
+                manifest_text = build_manifest(entries)
+            _atomic_write(manifest_path, manifest_text)
         else:
             print(
                 f"refusing to write manifest {args.manifest}: at least one input failed",
