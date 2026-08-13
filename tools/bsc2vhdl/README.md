@@ -158,6 +158,39 @@ plain-`case` path already renders these blocks as an ordered if/elsif
 chain, which is exactly the first-match semantics Icarus simulates and the
 equivalence gate compares. No emitter change is needed for these 14 blocks.
 
+### Per-construct resolution
+
+Each construct this census named, how it was actually resolved once mkQP,
+mkTransportLayer, and mkAxisTransportLayer were emitted, GHDL-elaborated,
+and equivalence-tested end to end (a census is a parse-level, item/port-
+shape-only walk; it cannot see whether a resolution needs an expression-
+level, statement-level, or GHDL-elaboration-level change), and the file
+that first exercised it:
+
+| Construct | Resolved by | First exercised at |
+|-----------|-------------|---------------------|
+| `always` block with more than one sensitivity item | `parser.py`'s `_check_always_sensitivity` relaxed from a single-item-only check to admit an arbitrary-length all-`level` sensitivity list; `emit.py`'s `_render_process`/`_render_combinational_process` render every item in the list, not only the first | `mkTransportLayer.v:4364` |
+| `always` block sensitivity edge `'negedge'` | `strip.py`'s `partition_always_blocks` measures a module's own functional storage via a new `_functional_storage_names` helper (signals touched by something with no `SystemCall`, i.e. no `$display`-shaped simulation-only construct) instead of the raw signal-declaration list, so the one real `negedge` block in the corpus -- a giant simulation-only assertion block capturing `$time` into 83 module-scope scratch registers referenced nowhere else in the file -- is correctly classified simulation-only and dropped before the renderer ever sees it. `parser.py`'s `_check_always_sensitivity` additionally admits a single `negedge` item at the shape-only check, and `emit.py`'s `_render_process` refuses outright if a `negedge` block ever survives the strip pass, so a future genuine *functional* `negedge` block fails loudly instead of silently rendering as `posedge` | `mkQP.v:24731` |
+| `case (1'b1) // synopsys parallel_case` priority mux | No code change. pyverilog strips comments before parsing, so the pragma never reaches the AST at all; `caseconv.py`'s existing plain-`case` path already renders the block as an ordered if/elsif chain, which is exactly the first-match semantics Icarus simulates and the equivalence gate compares against, over all 14 pragma-carrying blocks (4 in `mkTransportLayer.v`, 10 in `mkQP.v`) | `mkTransportLayer.v:4371` |
+
+Eight further gaps surfaced only during full emission, GHDL elaboration, or
+equivalence testing of `mkQP.vhd` -- invisible to a parse-level census by
+construction, since each needs expression/statement-level rendering or a
+real GHDL run to trigger at all: a plain sized literal (any base) as an
+`initial`-block default (`initializers.py`), a logical shift (`width.py`,
+`expr.py`'s `_render_shift`), an ambiguous bare-literal/concat operand under
+a type conversion or an equally-ambiguous comparison (`expr.py`'s
+`_qualify_for_cast`/`_is_ambiguous_operand`), a `case (1'b1)` priority-mux
+arm crash distinct from the no-change finding above (`caseconv.py`'s
+`_pattern_condition`), a leading-digit mangled identifier (`mangle.py`'s
+`_camel_case`), a scalar-to-vector component-port bridge for an entirely-
+unconnected port (`instantiate.py`'s A/B-paired sibling shape inference),
+and a generic-clause trailing-space lint violation (`instantiate.py`). All
+eight are documented with their exact fix in this repository's own commits
+(`cbb21e3`, `abff919`, `f3f4239`, `ce22053`) and in `mkQP.vhd`'s promotion
+commit in the surf submodule (`da6bc8bc3`), each proven to leave every
+already-committed fixture byte-identical before being accepted.
+
 ## Notable exclusions
 
 - `generate` / `endgenerate`: refused. A census across every real BSC target
