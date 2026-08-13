@@ -172,7 +172,7 @@ class AxisTransportLayerTester:
     async def resp_alloc_pd(self):
         for caseIdx in range(self.pdNum):
             dut_alloc_pd_resp = await self.meta_data_sink.recv()
-            metaRespBus = BitStream(uint = dut_alloc_pd_resp.tdata.integer, length = META_DATA_BITS)
+            metaRespBus = BitStream(uint = dut_alloc_pd_resp.tdata.to_unsigned(), length = META_DATA_BITS)
             pdResp = respPd(metaRespBus)
             assert pdResp.busType.uint == METADATA_PD_T, f'Bus type should be {METADATA_PD_T}, instead decoded {pdResp.busType.uint}'
             assert pdResp.successOrNot, "Creation of PD not successfull!"
@@ -202,7 +202,7 @@ class AxisTransportLayerTester:
     async def resp_alloc_mr(self):
         for caseIdx in range(self.mrNum):
             dut_alloc_mr_resp = await self.meta_data_sink.recv()
-            metaRespBus = BitStream(uint = dut_alloc_mr_resp.tdata.integer, length = META_DATA_BITS)
+            metaRespBus = BitStream(uint = dut_alloc_mr_resp.tdata.to_unsigned(), length = META_DATA_BITS)
             mrResp = respMr(metaRespBus)
             assert mrResp.busType.uint == METADATA_MR_T, f'Bus type should be {METADATA_MR_T}, instead decoded {mrResp.busType.uint}'
             assert mrResp.successOrNot, "Creation of MR not successfull!"
@@ -226,7 +226,7 @@ class AxisTransportLayerTester:
     async def resp_create_qp(self):
         for caseIdx in range(self.qpNum):
             dut_alloc_qp_resp = await self.meta_data_sink.recv()
-            metaRespBus = BitStream(uint = dut_alloc_qp_resp.tdata.integer, length = META_DATA_BITS)
+            metaRespBus = BitStream(uint = dut_alloc_qp_resp.tdata.to_unsigned(), length = META_DATA_BITS)
             qpResp = respQp(metaRespBus)
             assert qpResp.busType.uint == METADATA_QP_T, f'Bus type should be {METADATA_QP_T}, instead decoded {qpResp.busType.uint}'
             assert qpResp.successOrNot, "Creation of QP not successfull!"
@@ -250,7 +250,7 @@ class AxisTransportLayerTester:
     async def resp_init_qp(self):
         for caseIdx in range(self.qpNum):
             dut_alloc_qp_resp = await self.meta_data_sink.recv()
-            metaRespBus = BitStream(uint = dut_alloc_qp_resp.tdata.integer, length = META_DATA_BITS)
+            metaRespBus = BitStream(uint = dut_alloc_qp_resp.tdata.to_unsigned(), length = META_DATA_BITS)
             qpResp = respQp(metaRespBus)
             assert qpResp.busType.uint == METADATA_QP_T, f'Bus type should be {METADATA_QP_T}, instead decoded {qpResp.busType.uint}'
             assert qpResp.successOrNot, "QP to init state not successfull!"
@@ -275,7 +275,7 @@ class AxisTransportLayerTester:
     async def resp_rtr_qp(self):
         for caseIdx in range(self.qpNum):
             dut_alloc_qp_resp = await self.meta_data_sink.recv()
-            metaRespBus = BitStream(uint = dut_alloc_qp_resp.tdata.integer, length = META_DATA_BITS)
+            metaRespBus = BitStream(uint = dut_alloc_qp_resp.tdata.to_unsigned(), length = META_DATA_BITS)
             qpResp = respQp(metaRespBus)
             assert qpResp.busType.uint == METADATA_QP_T, f'Bus type should be {METADATA_QP_T}, instead decoded {qpResp.busType.uint}'
             assert qpResp.successOrNot, "QP to RTR state not successfull!"
@@ -302,7 +302,7 @@ class AxisTransportLayerTester:
     async def resp_rts_qp(self):
         for caseIdx in range(self.qpNum):
             dut_alloc_qp_resp = await self.meta_data_sink.recv()
-            metaRespBus = BitStream(uint = dut_alloc_qp_resp.tdata.integer, length = META_DATA_BITS)
+            metaRespBus = BitStream(uint = dut_alloc_qp_resp.tdata.to_unsigned(), length = META_DATA_BITS)
             qpResp = respQp(metaRespBus)
             assert qpResp.busType.uint == METADATA_QP_T, f'Bus type should be {METADATA_QP_T}, instead decoded {qpResp.busType.uint}'
             assert qpResp.successOrNot, "QP to RTS state not successfull!"
@@ -355,13 +355,13 @@ class AxisTransportLayerTester:
     async def get_dma_read_req(self):
         while True:
             dut_dma_req = await self.dma_read_clt_sink.recv()
-            await self.dmaRCRespsQ.put(dmaPyServer(initiator = dut_dma_req.initiator.integer,
-                                                   sqpn = dut_dma_req.sqpn.integer,
-                                                   startAddr = dut_dma_req.start_addr.integer,
-                                                   pktLen = dut_dma_req.len.integer,
-                                                   wrId = dut_dma_req.wr_id.integer,
+            await self.dmaRCRespsQ.put(dmaPyServer(initiator = dut_dma_req.initiator.to_unsigned(),
+                                                   sqpn = dut_dma_req.sqpn.to_unsigned(),
+                                                   startAddr = dut_dma_req.start_addr.to_unsigned(),
+                                                   pktLen = dut_dma_req.len.to_unsigned(),
+                                                   wrId = dut_dma_req.wr_id.to_unsigned(),
                                                    ))
-            self.log.debug(f'Received DMA req: wrId -> {hex(dut_dma_req.wr_id.integer)}, len -> {hex(dut_dma_req.len.integer)}')
+            self.log.debug(f'Received DMA req: wrId -> {hex(dut_dma_req.wr_id.to_unsigned())}, len -> {hex(dut_dma_req.len.to_unsigned())}')
 
     async def get_dma_read_resp(self):
         while True:

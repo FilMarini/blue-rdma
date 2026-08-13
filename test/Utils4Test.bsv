@@ -1578,22 +1578,10 @@ module mkSimInputPktBuf4SingleQP#(
     let inputRdmaPktBuf <- mkInputRdmaPktBufAndHeaderValidation(
         headerAndMetaDataAndPayloadPipeOut, qpMetaData
     );
-    let reqPktMetaDataAndPayloadPipeIn  = inputRdmaPktBuf[0].reqPktPipeOut;
     let respPktMetaDataAndPayloadPipeIn = inputRdmaPktBuf[0].respPktPipeOut;
     let cnpPipeIn = inputRdmaPktBuf[0].cnpPipeOut;
 
     for (Integer idx = 1; idx < valueOf(MAX_QP); idx = idx + 1) begin
-        let reqPktMetaDataPipeOutEmptyRule <- addRules(genEmptyPipeOutRule(
-            inputRdmaPktBuf[idx].reqPktPipeOut.pktMetaData,
-            "inputRdmaPktBuf[" + integerToString(idx) +
-            "].reqPktPipeOut.pktMetaData empty assertion @ mkSimInputPktBuf4SingleQP"
-        ));
-        let reqPktPayloadPipeOutEmptyRule <- addRules(genEmptyPipeOutRule(
-            inputRdmaPktBuf[idx].reqPktPipeOut.payload,
-            "inputRdmaPktBuf[" + integerToString(idx) +
-            "].reqPktPipeOut.payload empty assertion @ mkSimInputPktBuf4SingleQP"
-        ));
-
         let respPktMetaDataPipeOutEmptyRule <- addRules(genEmptyPipeOutRule(
             inputRdmaPktBuf[idx].respPktPipeOut.pktMetaData,
             "inputRdmaPktBuf[" + integerToString(idx) +
@@ -1613,34 +1601,20 @@ module mkSimInputPktBuf4SingleQP#(
     end
 
     rule checkEmpty;
-        if (isRespPktPipeIn) begin
-            immAssert(
-                !reqPktMetaDataAndPayloadPipeIn.pktMetaData.notEmpty &&
-                !reqPktMetaDataAndPayloadPipeIn.payload.notEmpty,
-                "reqPktMetaDataAndPayloadPipeIn assertion @ mkSimInputPktBuf4SingleQP",
-                $format(
-                    "reqPktMetaDataAndPayloadPipeIn.pktMetaData.notEmpty=",
-                    fshow(reqPktMetaDataAndPayloadPipeIn.pktMetaData.notEmpty),
-                    " and reqPktMetaDataAndPayloadPipeIn.payload.notEmpty=",
-                    fshow(reqPktMetaDataAndPayloadPipeIn.payload.notEmpty),
-                    " should both be false"
-                )
-            );
-        end
-        else begin
-            immAssert(
-                !respPktMetaDataAndPayloadPipeIn.pktMetaData.notEmpty &&
-                !respPktMetaDataAndPayloadPipeIn.payload.notEmpty,
-                "respPktMetaDataAndPayloadPipeIn assertion @ mkSimInputPktBuf4SingleQP",
-                $format(
-                    "respPktMetaDataAndPayloadPipeIn.pktMetaData.notEmpty=",
-                    fshow(respPktMetaDataAndPayloadPipeIn.pktMetaData.notEmpty),
-                    " and respPktMetaDataAndPayloadPipeIn.payload.notEmpty=",
-                    fshow(respPktMetaDataAndPayloadPipeIn.payload.notEmpty),
-                    " should both be false"
-                )
-            );
-        end
+        // The request-side ingress path (reqPktPipeOut) is disabled in
+        // InputPktHandle, so only the response and CNP pipes are checked here.
+        immAssert(
+            !respPktMetaDataAndPayloadPipeIn.pktMetaData.notEmpty &&
+            !respPktMetaDataAndPayloadPipeIn.payload.notEmpty,
+            "respPktMetaDataAndPayloadPipeIn assertion @ mkSimInputPktBuf4SingleQP",
+            $format(
+                "respPktMetaDataAndPayloadPipeIn.pktMetaData.notEmpty=",
+                fshow(respPktMetaDataAndPayloadPipeIn.pktMetaData.notEmpty),
+                " and respPktMetaDataAndPayloadPipeIn.payload.notEmpty=",
+                fshow(respPktMetaDataAndPayloadPipeIn.payload.notEmpty),
+                " should both be false"
+            )
+        );
 
         immAssert(
             !cnpPipeIn.notEmpty,
@@ -1653,7 +1627,7 @@ module mkSimInputPktBuf4SingleQP#(
         );
     endrule
 
-    return isRespPktPipeIn ? respPktMetaDataAndPayloadPipeIn : reqPktMetaDataAndPayloadPipeIn;
+    return respPktMetaDataAndPayloadPipeIn;
 endmodule
 
 // PipeOut related

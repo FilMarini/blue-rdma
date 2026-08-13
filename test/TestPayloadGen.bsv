@@ -681,8 +681,7 @@ module mkTestDmaReadCntrlNormalOrCancelCase#(Bool normalOrCancelCase)(Empty);
             isFirst: True,
             isLast : True
         };
-        let dummySGE = sge;
-        let sgl = vec(sge, dummySGE, dummySGE, dummySGE, dummySGE, dummySGE, dummySGE, dummySGE);
+        let sgl = vec(sge);
 
         let dmaReadCntrlReq = DmaReadCntrlReq {
             pmtu              : pmtu,

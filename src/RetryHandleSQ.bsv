@@ -92,6 +92,7 @@ module mkRetryHandleSQ#(
     // Reg#(Bool)         isTimeOutCntZeroReg <- mkRegU;
     Reg#(Bool)           disableTimeOutReg <- mkRegU;
     Reg#(Bool)          disableRetryCntReg <- mkRegU;
+    Reg#(Bool)            disableRnrCntReg <- mkRegU;
 
     Reg#(RetryReason)    retryReasonReg <- mkRegU;
     Reg#(WorkReqID)   retryWorkReqIdReg <- mkRegU;
@@ -135,7 +136,7 @@ module mkRetryHandleSQ#(
 
     function Bool retryCntExceedLimit(RetryReason retryReason);
         return case (retryReason)
-            RETRY_REASON_RNR     : isZero(rnrCntReg);
+            RETRY_REASON_RNR     : !disableRnrCntReg && isZero(rnrCntReg);
             RETRY_REASON_SEQ_ERR ,
             RETRY_REASON_IMPLICIT,
             RETRY_REASON_TIMEOUT : isZero(retryCntReg);
@@ -157,7 +158,7 @@ module mkRetryHandleSQ#(
                     end
                 end
                 RETRY_REASON_RNR: begin
-                    if (!disableRetryCntReg) begin
+                    if (!disableRnrCntReg) begin
                         if (!isZero(rnrCntReg)) begin
                             rnrCntReg <= rnrCntReg - 1;
                         end
@@ -182,6 +183,7 @@ module mkRetryHandleSQ#(
             retryCntReg        <= cntrlStatus.comm.getMaxRetryCnt;
             rnrCntReg          <= cntrlStatus.comm.getMaxRnrCnt;
             disableRetryCntReg <= cntrlStatus.comm.getMaxRetryCnt == fromInteger(valueOf(INFINITE_RETRY));
+            disableRnrCntReg   <= cntrlStatus.comm.getMaxRnrCnt == fromInteger(valueOf(INFINITE_RETRY));
             // $display(
             //     "time=%0t: resetRetryCntInternal cntrlStatus.comm.getMaxRetryCnt=%0d",
             //     $time, cntrlStatus.comm.getMaxRetryCnt
@@ -568,20 +570,24 @@ module mkRetryHandleSQ#(
             retryHandleStateReg <= RETRY_HANDLE_ST_CHECK_PARTIAL_RETRY_WR;
         end
 
+        // Re-arm the pending-WR scan from the queue head. The scan FIFO has three
+        // modes and each needs a different (or no) command -- a 2-way isScanDone
+        // branch deadlocks when this rule is re-entered by a NESTED retry (a 2nd
+        // RNR/NAK arriving during RNR_WAIT re-runs initRetry -> START_PRE_RETRY)
+        // while the FIFO is parked in PRE_SCAN_MODE: isScanDone is false there, so
+        // the old code issued preScanRestart(), whose implicit guard is inScanMode
+        // -- unsatisfiable in PRE_SCAN_MODE -- and the retry FSM wedges forever
+        // (dispatch + completions stall until a full QP/source drain). In
+        // PRE_SCAN_MODE the pre-scan is already armed at the head, so no command is
+        // needed; only FIFOF_MODE needs preScanStart and SCAN_MODE needs
+        // preScanRestart.
         if (pendingWorkReqScanCntrl.isScanDone) begin
             pendingWorkReqScanCntrl.preScanStart;
-            // $display(
-            //     "time=%0t: pendingWorkReqScanCntrl.preScanStart", $time,
-            //     " pendingWorkReqNotEmpty=", fshow(pendingWorkReqNotEmpty)
-            // );
         end
-        else begin
+        else if (pendingWorkReqScanCntrl.isScanMode) begin
             pendingWorkReqScanCntrl.preScanRestart;
-            // $display(
-            //     "time=%0t: pendingWorkReqScanCntrl.preScanRestart", $time,
-            //     " pendingWorkReqNotEmpty=", fshow(pendingWorkReqNotEmpty)
-            // );
         end
+        // else: already in PRE_SCAN_MODE (nested retry) -- head is armed, no-op.
         // $display(
         //     "time=%0t: startPreRetry", $time,
         //     ", retryHandleStateReg=", fshow(retryHandleStateReg),
