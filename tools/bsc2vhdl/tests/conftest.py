@@ -19,3 +19,8 @@ if str(_REPO_ROOT) not in sys.path:
 @pytest.fixture
 def vendor_dir() -> Path:
     return Path(__file__).resolve().parent / "vendor"
+
+
+@pytest.fixture
+def vendor_rdma_dir() -> Path:
+    return Path(__file__).resolve().parent / "vendor_rdma"

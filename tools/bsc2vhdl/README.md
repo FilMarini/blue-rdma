@@ -227,6 +227,31 @@ considered and declined in favor of this simpler emitter; it remains
 available if the changed initial state ever turns out to matter on real
 hardware.
 
+## This repository is now the only home for these Verilog sources
+
+surf no longer carries any of the sixteen Bluespec-generated `.v` files this
+tool transpiles: `tests/vendor/` (the thirteen blue-lib runtime primitives)
+and `tests/vendor_rdma/` (the three generated RDMA modules, `mkQP.v`,
+`mkTransportLayer.v`, `mkAxisTransportLayer.v`) are those files' only
+remaining copies in any repository. The two directories are kept separate
+on purpose: the three RDMA modules are two to three orders of magnitude
+larger than any single blue-lib primitive (`mkQP.v` alone is 33,443 lines),
+so folding them into the same glob as the thirteen blue-lib files would
+make every default `pytest` run transpile 53k extra lines. `tests/golden/
+manifest_rdma.json` is `tests/golden/manifest.json`'s RDMA-specific
+counterpart, covering only those three files.
+
+`test_provenance_rdma_source_hashes` in `tests/test_provenance_rdma.py`
+hashes all three vendored RDMA sources on every default run, so together
+with `test_provenance_source_hashes` over the thirteen blue-lib files, all
+sixteen vendored sources are hashed every time this suite runs. Byte-
+identical regeneration of the three RDMA outputs is the expensive half and
+only runs when `BSC2VHDL_RDMA_REGEN=1` is set:
+
+```
+BSC2VHDL_RDMA_REGEN=1 python -m pytest tools/bsc2vhdl/tests/test_provenance_rdma.py -q
+```
+
 ## Regenerating the committed fixtures
 
 The thirteen blue-lib primitives and `mkAxisTransportLayer` are committed as
@@ -266,6 +291,25 @@ output; only the manifest is committed here):
 python -m tools.bsc2vhdl tools/bsc2vhdl/tests/vendor/*.v \
     --out-dir /tmp/bsc2vhdl-manifest-regen \
     --manifest tools/bsc2vhdl/tests/golden/manifest.json
+```
+
+Regenerate this repository's own RDMA golden manifest, covering only the
+three vendored `tests/vendor_rdma/` files (discard the `.vhd` output; only
+the manifest is committed here). The three inputs must be copied into the
+scratch directory first, with `--out-dir` pointing at that same directory,
+not transpiled directly out of `tests/vendor_rdma/` into somewhere else:
+`mkQP.v`'s component declaration inside `mkTransportLayer.vhd` leaves
+twelve of `mkQP`'s own status-getter outputs unconnected, and their real
+(non-scalar) width is only resolved correctly when `mkQP.vhd` already
+sits next to `mkTransportLayer.v` on disk by the time the latter is
+transpiled:
+
+```
+mkdir -p /tmp/bsc2vhdl-rdma-manifest-regen
+cp tools/bsc2vhdl/tests/vendor_rdma/*.v /tmp/bsc2vhdl-rdma-manifest-regen/
+python -m tools.bsc2vhdl /tmp/bsc2vhdl-rdma-manifest-regen/*.v \
+    --out-dir /tmp/bsc2vhdl-rdma-manifest-regen \
+    --manifest tools/bsc2vhdl/tests/golden/manifest_rdma.json
 ```
 
 Verify the result in each repository:
