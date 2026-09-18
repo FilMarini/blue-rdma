@@ -217,36 +217,25 @@ module mkTestRespHandleNormalOrDupOrGhostRespCase#(
         cntrlStatus, pendingWorkReqBuf.fifof.notEmpty, pendingWorkReqBuf.scanCntrl
     );
 
-    // MR permission check
-    let mrCheckPassOrFail = True;
-    let permCheckSrv <- mkSimPermCheckSrv(mrCheckPassOrFail);
-
-    // PayloadConsumer
-    let simDmaWriteSrv <- mkSimDmaWriteSrvAndDataStreamPipeOut;
-    let readAtomicRespPayloadPipeOut = simDmaWriteSrv.dataStream;
-    let dmaWriteCntrl <- mkDmaWriteCntrl(cntrlStatus, simDmaWriteSrv.dmaWriteSrv);
-    let payloadConsumer <- mkPayloadConsumer(
-        cntrlStatus,
-        dmaWriteCntrl,
-        pktMetaDataAndPayloadPipeOut.payload
-        // dut.payloadConReqPipeOut
-    );
+    // mkRespHandleSQ no longer drives payload consumption (the SQ
+    // PayloadConsumer / permission-check / DMA-write path was removed), so the
+    // response payload stream is simply drained here to keep the pipeline
+    // flowing. The read/atomic response payload is therefore no longer
+    // observable, so the payload-content comparison below is skipped.
+    let sinkPayload <- mkSink(pktMetaDataAndPayloadPipeOut.payload);
 
     // DUT
     let dut <- mkRespHandleSQ(
         cntrl.contextSQ,
         retryHandler,
-        permCheckSrv,
         toPipeOut(pendingWorkReqBuf.fifof),
-        pktMetaDataPipeOut4RespHandle,
-        payloadConsumer.request
+        pktMetaDataPipeOut4RespHandle
     );
 
     // WorkCompGenSQ
     FIFOF#(WorkCompGenReqSQ) wcGenReqQ4ReqGenInSQ <- mkFIFOF;
     let workCompGenSQ <- mkWorkCompGenSQ(
         cntrlStatus,
-        payloadConsumer.response,
         // payloadConsumer.respPipeOut,
         toPipeOut(wcGenReqQ4ReqGenInSQ),
         dut.workCompGenReqPipeOut
@@ -330,22 +319,12 @@ module mkTestRespHandleNormalOrDupOrGhostRespCase#(
         let isRespPktEnd = False;
         if (workReqNeedDmaWriteSQ(pendingWR.wr)) begin
             if (isReadRespRdmaOpCode(bth.opcode)) begin // Read responses with non-zero payload
+                // The DUT no longer performs DMA-write of the read/atomic
+                // response payload, so the payload content is not observable
+                // here. Only the reference payload stream is drained to track
+                // packet-end; the payload-equality assertion is dropped.
                 let refDataStream = readRespPayloadPipeOut4Ref.first;
                 readRespPayloadPipeOut4Ref.deq;
-
-                if (isNormalWorkReq) begin
-                    let payloadDataStream = readAtomicRespPayloadPipeOut.first;
-                    readAtomicRespPayloadPipeOut.deq;
-
-                    immAssert(
-                        payloadDataStream == refDataStream,
-                        "payloadDataStream assertion @ mkTestRespHandleNormalCase",
-                        $format(
-                            "payloadDataStream=", fshow(payloadDataStream),
-                            " should == refDataStream=", fshow(refDataStream)
-                        )
-                    );
-                end
 
                 if (refDataStream.isLast) begin
                     isRespPktEnd = True;
@@ -353,11 +332,6 @@ module mkTestRespHandleNormalOrDupOrGhostRespCase#(
             end
             else begin // Atomic responses
                 isRespPktEnd = True;
-
-                if (isNormalWorkReq) begin
-                    // One fragment DMA write when handle atomic responses
-                    readAtomicRespPayloadPipeOut.deq;
-                end
             end
         end
         else begin
@@ -467,28 +441,18 @@ module mkTestRespHandleAbnormalCase#(TestRespHandleRespType respType)(Empty);
     let retryLimitExcOrTimeOutErr = respType != TEST_RESP_HANDLE_TIMEOUT_ERR;
     let retryHandler <- mkSimRetryHandleErr(retryLimitExcOrTimeOutErr);
 
-    // MR permission check
-    let mrCheckPassOrFail = !(respType == TEST_RESP_HANDLE_PERM_CHECK_FAIL);
-    let permCheckSrv <- mkSimPermCheckSrv(mrCheckPassOrFail);
-
-    // PayloadConsumer
-    let simDmaWriteSrv <- mkSimDmaWriteSrv;
-    let dmaWriteCntrl <- mkDmaWriteCntrl(cntrlStatus, simDmaWriteSrv);
-    let payloadConsumer <- mkPayloadConsumer(
-        cntrlStatus,
-        dmaWriteCntrl,
-        payloadOrEmptyPipeOut
-        // dut.payloadConReqPipeOut
-    );
+    // mkRespHandleSQ no longer drives payload consumption (the SQ
+    // PayloadConsumer / permission-check / DMA-write path was removed), so the
+    // response payload stream is simply drained here to keep the pipeline
+    // flowing.
+    let sinkPayload <- mkSink(payloadOrEmptyPipeOut);
 
     // DUT
     let dut <- mkRespHandleSQ(
         cntrl.contextSQ,
         retryHandler,
-        permCheckSrv,
         toPipeOut(pendingWorkReqBuf.fifof),
-        pktMetaDataOrEmptyPipeOut,
-        payloadConsumer.request
+        pktMetaDataOrEmptyPipeOut
     );
 
     // WorkCompGenSQ
@@ -502,7 +466,6 @@ module mkTestRespHandleAbnormalCase#(TestRespHandleRespType respType)(Empty);
     // let cntrl4WorkComp <- mkSimCntrlQP(qpType, pmtu, setExpectedPsnAsNextPSN);
     let workCompGenSQ <- mkWorkCompGenSQ(
         cntrlStatus,
-        payloadConsumer.response,
         // payloadConsumer.respPipeOut,
         toPipeOut(wcGenReqQ4ReqGenInSQ),
         dut.workCompGenReqPipeOut
@@ -682,10 +645,8 @@ module mkTestRespHandleRetryCase#(Bool rnrOrSeqErr, Bool nestedRetry)(Empty);
     let dut <- mkRespHandleSQ(
         cntrl.contextSQ,
         retryHandler,
-        permCheckSrv,
         toPipeOut(pendingWorkReqBuf.fifof),
-        pktMetaDataAndPayloadPipeOut.pktMetaData,
-        payloadConsumer.request
+        pktMetaDataAndPayloadPipeOut.pktMetaData
     );
 
     // WorkCompGenSQ
@@ -693,7 +654,6 @@ module mkTestRespHandleRetryCase#(Bool rnrOrSeqErr, Bool nestedRetry)(Empty);
     // FIFOF#(WorkCompStatus) workCompStatusQFromRQ <- mkFIFOF;
     let workCompGenSQ <- mkWorkCompGenSQ(
         cntrlStatus,
-        payloadConsumer.response,
         // payloadConsumer.respPipeOut,
         toPipeOut(wcGenReqQ4ReqGenInSQ),
         dut.workCompGenReqPipeOut

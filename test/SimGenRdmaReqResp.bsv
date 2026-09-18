@@ -652,7 +652,7 @@ module mkTestSimGenRdmaResp(Empty);
 
     // Generate RDMA responses
     let rdmaRespAndHeaderPipeOut <- mkSimGenRdmaRespHeaderAndDataStream(
-        cntrl.contextRQ.statusRQ, simDmaReadSrv.dmaReadSrv, pendingWorkReqPipeOut4RespGen
+        cntrl.contextSQ.statusSQ, simDmaReadSrv.dmaReadSrv, pendingWorkReqPipeOut4RespGen
     );
     let rdmaRespHeaderPipeOut4Ref <- mkBufferN(2, rdmaRespAndHeaderPipeOut.respHeader);
     Vector#(2, PipeOut#(HeaderRDMA)) rdmaRespHeaderPipeOut4RefVec <-

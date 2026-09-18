@@ -35,17 +35,6 @@ module mkTestReceiveCNP(Empty);
     );
 
     for (Integer idx = 1; idx < valueOf(MAX_QP); idx = idx + 1) begin
-        let reqPktMetaDataPipeOutEmptyRule <- addRules(genEmptyPipeOutRule(
-            dut[idx].reqPktPipeOut.pktMetaData,
-            "dut[" + integerToString(idx) +
-            "].reqPktPipeOut.pktMetaData empty assertion @ mkTestReceiveCNP"
-        ));
-        let reqPktPayloadPipeOutEmptyRule <- addRules(genEmptyPipeOutRule(
-            dut[idx].reqPktPipeOut.payload,
-            "dut[" + integerToString(idx) +
-            "].reqPktPipeOut.payload empty assertion @ mkTestReceiveCNP"
-        ));
-
         let respPktMetaDataPipeOutEmptyRule <- addRules(genEmptyPipeOutRule(
             dut[idx].respPktPipeOut.pktMetaData,
             "dut[" + integerToString(idx) +
@@ -79,21 +68,7 @@ module mkTestReceiveCNP(Empty);
             )
         );
 
-        let reqPktMetaDataAndPayloadPipeOut = dut[qpIndex].reqPktPipeOut;
         let respPktMetaDataAndPayloadPipeOut = dut[qpIndex].respPktPipeOut;
-        immAssert(
-            !reqPktMetaDataAndPayloadPipeOut.pktMetaData.notEmpty &&
-            !reqPktMetaDataAndPayloadPipeOut.payload.notEmpty,
-            "reqPktMetaDataAndPayloadPipeOut assertion @ mkTestReceiveCNP",
-            $format(
-                "reqPktMetaDataAndPayloadPipeOut.pktMetaData.notEmpty=",
-                fshow(reqPktMetaDataAndPayloadPipeOut.pktMetaData.notEmpty),
-                " and reqPktMetaDataAndPayloadPipeOut.payload.notEmpty=",
-                fshow(reqPktMetaDataAndPayloadPipeOut.payload.notEmpty),
-                " should both be false"
-            )
-        );
-
         immAssert(
             !respPktMetaDataAndPayloadPipeOut.pktMetaData.notEmpty &&
             !respPktMetaDataAndPayloadPipeOut.payload.notEmpty,

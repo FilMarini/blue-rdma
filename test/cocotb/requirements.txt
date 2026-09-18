@@ -1,0 +1,11 @@
+# Python dependencies for the cocotb AXI-Stream integration test
+# (test/cocotb/TestAxiSTransportLayer.py). Install with:
+#   pip install -r test/cocotb/requirements.txt
+#
+# Note: the cocotb flow is run manually via `make cocotb`; it is not part of the
+# BlueSim CI (run.sh). It additionally requires the Bluespec toolchain (bsc,
+# bluetcl) on PATH and the Icarus Verilog simulator (iverilog).
+cocotb
+cocotb-test
+cocotbext-axi
+bitstring

@@ -22,10 +22,14 @@ VDIR = rtl
 SRCOUTDIR = -bdir $(BUILDDIR) -info-dir $(BUILDDIR) -simdir $(BUILDDIR) -vdir $(VDIR)
 WORKDIR = -fdir $(abspath .)
 ROOT_DIR = $(abspath ../)
+SRC_DIR = $(ROOT_DIR)/src
 LIB_WRAPPER_DIR = $(ROOT_DIR)/lib/blue-wrapper/src
 LIBSRCDIR = $(LIB_WRAPPER_DIR)
+# Source builds run from src/ (src is implicitly on the path), so they only
+# need the wrapper lib. Test builds run from test/ and must add src explicitly.
 BSVSRCDIR = -p +:$(LIBSRCDIR)
-DIRFLAGS = $(BSVSRCDIR) $(OUTDIR) $(WORKDIR)
+TESTSRCDIR = -p +:$(SRC_DIR):$(LIBSRCDIR)
+DIRFLAGS = $(TESTSRCDIR) $(OUTDIR) $(WORKDIR)
 SRCDIRFLAGS = $(BSVSRCDIR) $(SRCOUTDIR) $(WORKDIR)
 MISCFLAGS = -print-flags -show-timestamps -show-version -steps 6000000 # -D macro
 RUNTIMEFLAGS = +RTS -K4095M -RTS

@@ -288,8 +288,7 @@ module mkTestSendQueueRawPktCase(Empty);
             isFirst: True,
             isLast : True
         };
-        let dummySGE = sge;
-        let sgl = vec(sge, dummySGE, dummySGE, dummySGE, dummySGE, dummySGE, dummySGE, dummySGE);
+        let sgl = vec(sge);
 
         let wqe = WorkQueueElem {
             id            : dontCareValue,
